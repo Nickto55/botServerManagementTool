@@ -52,7 +52,7 @@ systemctl daemon-reload
 systemctl enable --now botmanager.service
 
 # Nginx config
-cat > /etc/nginx/sites-available/botmanager.conf <<EOF
+cat > /etc/nginx/sites-available/botmanager.conf <<'EOF'
 server {
     listen 80;
     server_name _;
@@ -86,6 +86,7 @@ EOF
 
 ln -sf /etc/nginx/sites-available/botmanager.conf /etc/nginx/sites-enabled/botmanager.conf
 rm -f /etc/nginx/sites-enabled/default || true
+nginx -t
 systemctl restart nginx
 
 echo "Installation complete. Login with ADMIN_USER/ADMIN_PASS."

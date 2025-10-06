@@ -108,3 +108,37 @@ sudo systemctl start botmanager
 
 ## Лицензия
 MIT (добавьте LICENSE при необходимости)
+
+## Health-check
+Маршрут `/health` возвращает `{"status":"ok"}` для использования в мониторинге или проверках Nginx / systemd.
+
+## Чистая переустановка (если всё удалили)
+```bash
+# предположим вы удалили каталог
+sudo systemctl stop botmanager || true
+sudo rm -f /etc/systemd/system/botmanager.service
+sudo rm -f /etc/nginx/sites-enabled/botmanager.conf /etc/nginx/sites-available/botmanager.conf
+sudo systemctl daemon-reload
+sudo systemctl restart nginx
+
+# Клонируем заново
+cd /opt
+sudo git clone https://github.com/USER/botServerManagementTool.git botmanager
+cd botmanager
+sudo bash install.sh
+```
+Проверьте:
+```bash
+curl -f http://127.0.0.1/health
+systemctl status botmanager
+nginx -t
+```
+
+## Деплой в /opt (вариант)
+Можно переместить проект до запуска скрипта:
+```bash
+sudo mv ~/botServerManagementTool /opt/botmanager
+cd /opt/botmanager
+sudo bash install.sh
+```
+Тогда пути в nginx будут ссылаться на `/opt/botmanager`.
