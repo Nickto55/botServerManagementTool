@@ -59,10 +59,23 @@
                       <i class="fas fa-terminal"></i> Терминал
                     </a>
                   {% endif %}
-                  <button class="btn btn-outline-success btn-sm act" data-name="{{ ws.name }}" data-act="start">▶</button>
-                  <button class="btn btn-outline-warning btn-sm act" data-name="{{ ws.name }}" data-act="stop">■</button>
-                  <button class="btn btn-outline-info btn-sm act" data-name="{{ ws.name }}" data-act="restart">↻</button>
-                  <button class="btn btn-outline-danger btn-sm act" data-name="{{ ws.name }}" data-act="remove">✖</button>
+                  <button class="btn btn-outline-success btn-sm act" data-name="{{ ws.name }}" data-act="start" title="Запустить">▶</button>
+                  <button class="btn btn-outline-warning btn-sm act" data-name="{{ ws.name }}" data-act="stop" title="Остановить">■</button>
+                  <button class="btn btn-outline-info btn-sm act" data-name="{{ ws.name }}" data-act="restart" title="Перезапустить">↻</button>
+                  <div class="btn-group dropup">
+                    <button class="btn btn-outline-danger btn-sm dropdown-toggle" data-bs-toggle="dropdown" title="Удалить">
+                      🗑️
+                    </button>
+                    <ul class="dropdown-menu">
+                      <li><a class="dropdown-item delete-workspace" data-name="{{ ws.name }}" data-files="false">
+                        <i class="fas fa-stop-circle text-warning"></i> Удалить только контейнер
+                      </a></li>
+                      <li><hr class="dropdown-divider"></li>
+                      <li><a class="dropdown-item delete-workspace text-danger" data-name="{{ ws.name }}" data-files="true">
+                        <i class="fas fa-trash text-danger"></i> Удалить контейнер и файлы
+                      </a></li>
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
@@ -170,6 +183,80 @@ document.getElementById('createBotForm').addEventListener('submit', async (e)=>{
     btn.innerHTML = originalText;
     btn.disabled = false;
   }
+});
+
+// Обработка удаления workspace
+document.querySelectorAll('.delete-workspace').forEach(btn => {
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const name = btn.dataset.name;
+    const deleteFiles = btn.dataset.files === 'true';
+    
+    // Получаем информацию о workspace для подтверждения
+    try {
+      const infoRes = await fetch(`/workspace/${name}/info`);
+      const infoData = await infoRes.json();
+      
+      if (infoData.status === 'ok') {
+        const info = infoData.info;
+        const filesCount = info.files_count || 0;
+        const sizeKB = Math.round((info.directory_size || 0) / 1024);
+        
+        let confirmMessage = `Удалить workspace "${name}"?\n\n`;
+        confirmMessage += `📁 Файлов: ${filesCount}\n`;
+        confirmMessage += `💾 Размер: ${sizeKB} KB\n\n`;
+        
+        if (deleteFiles) {
+          confirmMessage += '⚠️  ВНИМАНИЕ: Все файлы будут удалены НАВСЕГДА!\n';
+          confirmMessage += 'Это действие нельзя отменить!';
+        } else {
+          confirmMessage += '✅ Файлы workspace останутся в папке bots/\n';
+          confirmMessage += 'Удаляется только Docker контейнер.';
+        }
+        
+        if (!confirm(confirmMessage)) return;
+      }
+    } catch (err) {
+      if (!confirm(`Удалить workspace "${name}"?`)) return;
+    }
+    
+    // Показываем индикатор загрузки
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Удаление...';
+    btn.style.pointerEvents = 'none';
+    
+    try {
+      const res = await fetch(`/workspace/${name}/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_files: deleteFiles })
+      });
+      
+      const data = await res.json();
+      
+      if (data.status === 'ok') {
+        // Показываем сообщение об успехе
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-success alert-dismissible fade show';
+        alertDiv.innerHTML = `
+          <i class="fas fa-check-circle"></i> ${data.message}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.querySelector('.container-fluid').prepend(alertDiv);
+        
+        // Перезагружаем страницу через 2 секунды
+        setTimeout(() => location.reload(), 2000);
+      } else {
+        alert('Ошибка: ' + data.error);
+        btn.innerHTML = originalText;
+        btn.style.pointerEvents = '';
+      }
+    } catch (err) {
+      alert('Ошибка сети: ' + err.message);
+      btn.innerHTML = originalText;
+      btn.style.pointerEvents = '';
+    }
+  });
 });
 
 // Действия с контейнерами (боты и workspace)

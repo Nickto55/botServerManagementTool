@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, session
 from flask_socketio import SocketIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -120,8 +120,43 @@ except Exception as e:
     # Продолжаем работу, но отмечаем проблему
 
 
+# Глобальная проверка авторизации
+@app.before_request
+def require_login():
+    """Требовать авторизацию для всех страниц кроме разрешенных"""
+    # Список разрешенных endpoints без авторизации
+    allowed_endpoints = [
+        'login', 'static', 'health'
+    ]
+    
+    # Список разрешенных путей без авторизации
+    allowed_paths = [
+        '/login', '/static/', '/health'
+    ]
+    
+    # Проверяем, нужна ли авторизация
+    if request.endpoint in allowed_endpoints:
+        return None
+        
+    for path in allowed_paths:
+        if request.path.startswith(path):
+            return None
+    
+    # Если пользователь не авторизован - редирект на логин
+    if 'user_id' not in session:
+        if request.method == 'POST' or request.is_json:
+            # Для API запросов возвращаем JSON ошибку
+            return jsonify({
+                'status': 'error', 
+                'error': 'Требуется авторизация',
+                'redirect': url_for('login')
+            }), 401
+        else:
+            # Для обычных запросов - редирект
+            return redirect(url_for('login'))
+
+
 @app.route('/')
-@login_required
 def dashboard():
     bots = list_bots()
     workspaces = list_workspaces()
@@ -129,7 +164,6 @@ def dashboard():
 
 
 @app.route('/bots/create', methods=['POST'])
-@login_required
 @limiter.limit("5 per minute")
 def create_bot():
     try:
@@ -160,7 +194,6 @@ def create_bot():
 
 
 @app.route('/workspace/create', methods=['GET', 'POST'])
-@login_required
 @limiter.limit("10 per minute")
 def create_workspace_page():
     if request.method == 'POST':
@@ -234,7 +267,6 @@ def create_workspace_page():
 
 
 @app.route('/bots/<name>/<action>', methods=['POST'])
-@login_required
 def bot_action(name, action):
     try:
         if action == 'start':
@@ -252,15 +284,38 @@ def bot_action(name, action):
         return jsonify({'status': 'error', 'error': str(e)}), 400
 
 
+@app.route('/workspace/<name>/info', methods=['GET'])
+def workspace_info(name):
+    """Получить информацию о workspace"""
+    try:
+        from docker_api import get_workspace_info
+        info = get_workspace_info(name)
+        return jsonify({'status': 'ok', 'info': info})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+
+
+@app.route('/workspace/<name>/delete', methods=['POST'])
+def delete_workspace(name):
+    """Удалить workspace"""
+    try:
+        from docker_api import remove_workspace
+        data = request.get_json() or {}
+        delete_files = data.get('delete_files', False)
+        
+        message = remove_workspace(name, delete_files=delete_files)
+        return jsonify({'status': 'ok', 'message': message})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 400
+
+
 @app.route('/terminal/<name>')
-@login_required
 def terminal_view(name):
     return render_template('terminal.html', container=name)
 
 
 # Frontend override upload
 @app.route('/upload/frontend', methods=['GET', 'POST'])
-@login_required
 def upload_frontend():
     if request.method == 'POST':
         if 'file' not in request.files:
@@ -280,7 +335,6 @@ def upload_frontend():
 
 # Serve overridden frontend files first
 @app.route('/override/<path:filename>')
-@login_required
 def overridden_static(filename):
     return send_from_directory(cfg.UPLOADS_DIR, filename)
 

@@ -84,6 +84,93 @@ def remove_bot(name: str, force: bool = False):
     return True
 
 
+def remove_workspace(name: str, delete_files: bool = False):
+    """
+    Удалить workspace контейнер и опционально файлы
+    
+    Args:
+        name: имя workspace (оригинальное или docker-нормализованное)
+        delete_files: удалить ли файлы workspace с диска
+    """
+    cli = get_client()
+    
+    # Получаем нормализованное имя для Docker
+    docker_name = normalize_docker_name(name)
+    
+    try:
+        # Пробуем найти контейнер по нормализованному имени
+        container = cli.containers.get(docker_name)
+    except:
+        try:
+            # Если не найден, пробуем по оригинальному имени
+            container = cli.containers.get(name)
+            docker_name = name
+        except:
+            raise ValueError(f'Контейнер "{name}" не найден')
+    
+    # Останавливаем и удаляем контейнер
+    try:
+        container.stop()
+    except:
+        pass  # Контейнер может быть уже остановлен
+    
+    container.remove(force=True)
+    
+    # Удаляем файлы если запрошено
+    if delete_files:
+        workspace_dir = os.path.join(cfg.BOTS_DIR, name)
+        if os.path.exists(workspace_dir):
+            shutil.rmtree(workspace_dir)
+            return f'Workspace "{name}" и все файлы удалены'
+    
+    return f'Workspace контейнер "{name}" удален (файлы сохранены)'
+
+
+def get_workspace_info(name: str):
+    """Получить информацию о workspace"""
+    workspace_dir = os.path.join(cfg.BOTS_DIR, name)
+    docker_name = normalize_docker_name(name)
+    
+    info = {
+        'name': name,
+        'docker_name': docker_name,
+        'directory': workspace_dir,
+        'exists_on_disk': os.path.exists(workspace_dir),
+        'container_exists': False,
+        'container_status': None,
+        'files_count': 0,
+        'directory_size': 0
+    }
+    
+    # Проверяем контейнер
+    cli = get_client()
+    try:
+        container = cli.containers.get(docker_name)
+        info['container_exists'] = True
+        info['container_status'] = container.status
+    except:
+        try:
+            container = cli.containers.get(name)
+            info['container_exists'] = True
+            info['container_status'] = container.status
+        except:
+            pass
+    
+    # Считаем файлы и размер
+    if info['exists_on_disk']:
+        try:
+            for root, dirs, files in os.walk(workspace_dir):
+                info['files_count'] += len(files)
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if os.path.exists(file_path):
+                        info['directory_size'] += os.path.getsize(file_path)
+        except:
+            pass
+    
+    return info
+
+
 def create_bot_from_repo(git_url: str, bot_name: Optional[str] = None, branch: Optional[str] = None):
     # Получаем исходное имя бота
     if not bot_name:
