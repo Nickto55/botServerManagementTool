@@ -51,6 +51,8 @@ Type=simple
 WorkingDirectory=$APP_DIR
 ExecStart=$APP_DIR/venv/bin/python app.py
 Restart=always
+RestartSec=5
+TimeoutStartSec=60
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

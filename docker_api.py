@@ -10,11 +10,24 @@ from git import Repo
 
 from config import cfg
 
-client = docker.from_env()
+_client = None
+
+
+def get_client():
+    global _client
+    if _client is None:
+        try:
+            _client = docker.from_env()
+        except Exception as e:
+            raise RuntimeError(f"Не удалось инициализировать Docker клиент: {e}")
+    return _client
 
 
 def list_bots() -> List[Dict]:
-    containers = client.containers.list(all=True, filters={'label': 'bot-manager=1'})
+    try:
+        containers = get_client().containers.list(all=True, filters={'label': 'bot-manager=1'})
+    except Exception as e:
+        return [{'id': '-', 'name': 'ERROR', 'status': f'docker err: {e}', 'image': '-', 'created': '-'}]
     data = []
     for c in containers:
         data.append({
@@ -28,25 +41,25 @@ def list_bots() -> List[Dict]:
 
 
 def start_bot(name: str):
-    container = client.containers.get(name)
+    container = get_client().containers.get(name)
     container.start()
     return True
 
 
 def stop_bot(name: str):
-    container = client.containers.get(name)
+    container = get_client().containers.get(name)
     container.stop()
     return True
 
 
 def restart_bot(name: str):
-    container = client.containers.get(name)
+    container = get_client().containers.get(name)
     container.restart()
     return True
 
 
 def remove_bot(name: str, force: bool = False):
-    container = client.containers.get(name)
+    container = get_client().containers.get(name)
     container.remove(force=force)
     return True
 
@@ -65,17 +78,16 @@ def create_bot_from_repo(git_url: str, bot_name: Optional[str] = None, branch: O
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    # Build image (if Dockerfile present) else use default image and mount source
     dockerfile_path = os.path.join(bot_dir, 'Dockerfile')
     image_tag = f'bot_{bot_name}:latest'
+    cli = get_client()
     if os.path.exists(dockerfile_path):
-        client.images.build(path=bot_dir, tag=image_tag)
+        cli.images.build(path=bot_dir, tag=image_tag)
     else:
-        # Build from generic bot Dockerfile template
         base_bot_dockerfile = os.path.join(os.path.dirname(__file__), 'Dockerfile.bot')
-        client.images.build(path=os.path.dirname(base_bot_dockerfile), dockerfile=base_bot_dockerfile, tag=image_tag, buildargs={'BOT_NAME': bot_name})
+        cli.images.build(path=os.path.dirname(base_bot_dockerfile), dockerfile=base_bot_dockerfile, tag=image_tag, buildargs={'BOT_NAME': bot_name})
 
-    container = client.containers.run(
+    container = cli.containers.run(
         image_tag,
         name=bot_name,
         labels={'bot-manager': '1'},
@@ -89,13 +101,17 @@ def create_bot_from_repo(git_url: str, bot_name: Optional[str] = None, branch: O
 
 
 def ensure_network():
-    networks = client.networks.list(names=[cfg.DOCKER_BASE_NETWORK])
-    if not networks:
-        client.networks.create(cfg.DOCKER_BASE_NETWORK, driver='bridge')
+    try:
+        cli = get_client()
+        networks = cli.networks.list(names=[cfg.DOCKER_BASE_NETWORK])
+        if not networks:
+            cli.networks.create(cfg.DOCKER_BASE_NETWORK, driver='bridge')
+    except Exception:
+        # Не валим старт приложения если docker недоступен
+        pass
 
 
-# Exec command inside container (for terminal)
 def exec_command(container_name: str, cmd: str):
-    container = client.containers.get(container_name)
-    exec_id = client.api.exec_create(container.id, cmd, tty=True, stdin=True)
+    container = get_client().containers.get(container_name)
+    exec_id = get_client().api.exec_create(container.id, cmd, tty=True, stdin=True)
     return exec_id['Id']
