@@ -1,61 +1,227 @@
 {% extends 'layout.html' %}
 {% block content %}
-<h3>Боты</h3>
-<div class="card mb-4 p-3">
-  <form id="createBotForm" class="row g-2">
-    <div class="col-md-4">
-      <input class="form-control" name="git_url" placeholder="Git URL" required>
+
+<!-- Навигация табов -->
+<ul class="nav nav-tabs mb-4" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="workspaces-tab" data-bs-toggle="tab" 
+            data-bs-target="#workspaces" type="button">
+      <i class="fas fa-cube"></i> Workspace ({{ workspaces|length }})
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="bots-tab" data-bs-toggle="tab" 
+            data-bs-target="#bots" type="button">
+      <i class="fas fa-robot"></i> Git Боты ({{ bots|length }})
+    </button>
+  </li>
+</ul>
+
+<!-- Содержимое табов -->
+<div class="tab-content">
+  <!-- Workspace Tab -->
+  <div class="tab-pane fade show active" id="workspaces" role="tabpanel">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4>Docker Workspace</h4>
+      <a href="/workspace/create" class="btn btn-success">
+        <i class="fas fa-plus"></i> Создать Workspace
+      </a>
     </div>
-    <div class="col-md-3">
-      <input class="form-control" name="bot_name" placeholder="Имя (опционально)">
+    
+    {% if workspaces %}
+      <div class="row">
+        {% for ws in workspaces %}
+          <div class="col-md-6 col-lg-4 mb-3">
+            <div class="card card-bot h-100">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">{{ ws.name }}</h6>
+                <span class="status-indicator status-{{ 'running' if ws.status == 'running' else 'stopped' }}"></span>
+              </div>
+              <div class="card-body">
+                <p class="text-muted mb-2">
+                  <i class="fas fa-box"></i> {{ ws.image|truncate(40) }}
+                </p>
+                <p class="mb-2">
+                  <span class="badge bg-{{ 'success' if ws.status == 'running' else 'secondary' }}">
+                    {{ ws.status }}
+                  </span>
+                </p>
+                {% if ws.has_workspace %}
+                  <p class="text-success mb-2">
+                    <i class="fas fa-check-circle"></i> Файлы созданы
+                  </p>
+                {% endif %}
+              </div>
+              <div class="card-footer">
+                <div class="btn-group w-100" role="group">
+                  {% if ws.status == 'running' %}
+                    <a href="/terminal/{{ ws.name }}" class="btn btn-outline-primary btn-sm">
+                      <i class="fas fa-terminal"></i> Терминал
+                    </a>
+                  {% endif %}
+                  <button class="btn btn-outline-success btn-sm act" data-name="{{ ws.name }}" data-act="start">▶</button>
+                  <button class="btn btn-outline-warning btn-sm act" data-name="{{ ws.name }}" data-act="stop">■</button>
+                  <button class="btn btn-outline-info btn-sm act" data-name="{{ ws.name }}" data-act="restart">↻</button>
+                  <button class="btn btn-outline-danger btn-sm act" data-name="{{ ws.name }}" data-act="remove">✖</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-center py-5">
+        <i class="fas fa-cube fa-3x text-muted mb-3"></i>
+        <h5 class="text-muted">Нет созданных Workspace</h5>
+        <p class="text-muted">Создайте первый workspace для разработки бота</p>
+        <a href="/workspace/create" class="btn btn-success">
+          <i class="fas fa-plus"></i> Создать первый Workspace
+        </a>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Боты из Git Tab -->
+  <div class="tab-pane fade" id="bots" role="tabpanel">
+    <h4>Боты из Git репозиториев</h4>
+    
+    <div class="card mb-4 p-3">
+      <form id="createBotForm" class="row g-2">
+        <div class="col-md-4">
+          <input class="form-control" name="git_url" placeholder="Git URL" required>
+        </div>
+        <div class="col-md-3">
+          <input class="form-control" name="bot_name" placeholder="Имя (опционально)">
+        </div>
+        <div class="col-md-2">
+          <input class="form-control" name="branch" placeholder="Branch (опц.)">
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-success w-100" type="submit">Клонировать</button>
+        </div>
+      </form>
     </div>
-    <div class="col-md-2">
-      <input class="form-control" name="branch" placeholder="Branch (опц.)">
-    </div>
-    <div class="col-md-2">
-      <button class="btn btn-success w-100" type="submit">Создать</button>
-    </div>
-  </form>
+    {% if bots %}
+      <table class="table table-striped">
+        <thead>
+          <tr><th>Имя</th><th>Статус</th><th>Образ</th><th>Действия</th></tr>
+        </thead>
+        <tbody id="botsTbody">
+          {% for b in bots %}
+            <tr data-name="{{b.name}}">
+              <td><a href="/terminal/{{b.name}}">{{ b.name }}</a></td>
+              <td>
+                <span class="badge bg-{{ 'success' if b.status == 'running' else 'secondary' }}">
+                  {{ b.status }}
+                </span>
+              </td>
+              <td>{{ b.image|truncate(40) }}</td>
+              <td>
+                <div class="btn-group btn-group-actions" role="group">
+                  <button class="btn btn-sm btn-outline-success act" data-name="{{b.name}}" data-act="start">▶</button>
+                  <button class="btn btn-sm btn-outline-warning act" data-name="{{b.name}}" data-act="stop">■</button>
+                  <button class="btn btn-sm btn-outline-info act" data-name="{{b.name}}" data-act="restart">↻</button>
+                  <button class="btn btn-sm btn-outline-danger act" data-name="{{b.name}}" data-act="remove">✖</button>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="text-center py-4">
+        <i class="fas fa-robot fa-3x text-muted mb-3"></i>
+        <h5 class="text-muted">Нет клонированных ботов</h5>
+        <p class="text-muted">Клонируйте бота из Git репозитория</p>
+      </div>
+    {% endif %}
+  </div>
 </div>
-<table class="table table-striped">
-  <thead>
-    <tr><th>Имя</th><th>Статус</th><th>Образ</th><th>Действия</th></tr>
-  </thead>
-  <tbody id="botsTbody">
-    {% for b in bots %}
-      <tr data-name="{{b.name}}">
-        <td><a href="/terminal/{{b.name}}">{{ b.name }}</a></td>
-        <td>{{ b.status }}</td>
-        <td>{{ b.image }}</td>
-        <td>
-          <button class="btn btn-sm btn-outline-success act" data-act="start">▶</button>
-          <button class="btn btn-sm btn-outline-warning act" data-act="stop">■</button>
-          <button class="btn btn-sm btn-outline-info act" data-act="restart">↻</button>
-          <button class="btn btn-sm btn-outline-danger act" data-act="remove">✖</button>
-        </td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-  document.getElementById('createBotForm').addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const obj = Object.fromEntries(fd.entries());
-    const res = await fetch('/bots/create', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj)});
+// Создание бота из Git
+document.getElementById('createBotForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Клонирование...';
+  btn.disabled = true;
+  
+  const fd = new FormData(e.target);
+  const obj = Object.fromEntries(fd.entries());
+  
+  try {
+    const res = await fetch('/bots/create', {
+      method:'POST', 
+      headers:{'Content-Type':'application/json'}, 
+      body: JSON.stringify(obj)
+    });
     const data = await res.json();
-    if(data.status==='ok'){ location.reload(); } else { alert(data.error); }
-  });
-  document.querySelectorAll('.act').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const tr = btn.closest('tr');
-      const name = tr.dataset.name;
-      const act = btn.dataset.act;
-      if(act==='remove' && !confirm('Удалить контейнер?')) return;
+    
+    if(data.status==='ok') { 
+      location.reload(); 
+    } else { 
+      alert('Ошибка: ' + data.error); 
+    }
+  } catch(err) {
+    alert('Ошибка сети: ' + err.message);
+  } finally {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+});
+
+// Действия с контейнерами (боты и workspace)
+document.querySelectorAll('.act').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const name = btn.dataset.name;
+    const act = btn.dataset.act;
+    
+    if(act==='remove' && !confirm(`Удалить контейнер "${name}"?\n\nВнимание: Данные workspace сохранятся в папке bots/`)) return;
+    
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    
+    try {
       const res = await fetch(`/bots/${name}/${act}`, {method:'POST'});
       const data = await res.json();
-      if(data.status==='ok'){ location.reload(); } else { alert(data.error); }
+      
+      if(data.status==='ok') { 
+        location.reload(); 
+      } else { 
+        alert('Ошибка: ' + data.error); 
+      }
+    } catch(err) {
+      alert('Ошибка сети: ' + err.message);
+    } finally {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    }
+  });
+});
+
+// Сохранение активной вкладки
+document.addEventListener('DOMContentLoaded', function() {
+  // Восстанавливаем активную вкладку из localStorage
+  const activeTab = localStorage.getItem('activeTab');
+  if(activeTab) {
+    const tabElement = document.querySelector(`#${activeTab}-tab`);
+    if(tabElement) {
+      const tab = new bootstrap.Tab(tabElement);
+      tab.show();
+    }
+  }
+  
+  // Сохраняем при переключении
+  document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+    tab.addEventListener('shown.bs.tab', function(e) {
+      const tabId = e.target.id.replace('-tab', '');
+      localStorage.setItem('activeTab', tabId);
     });
   });
+});
 </script>
+{% endblock %}
 {% endblock %}

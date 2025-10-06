@@ -1,0 +1,91 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6">
+    <h3>Профиль пользователя</h3>
+    
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5 class="mb-0">Информация о пользователе</h5>
+      </div>
+      <div class="card-body">
+        <p><strong>Текущее имя:</strong> <code>{{ user.username }}</code></p>
+        <p><strong>ID:</strong> {{ user.id }}</p>
+      </div>
+    </div>
+    
+    <!-- Смена имени пользователя -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5 class="mb-0">Изменить имя пользователя</h5>
+      </div>
+      <div class="card-body">
+        <form method="post">
+          <input type="hidden" name="action" value="change_username">
+          <div class="mb-3">
+            <label class="form-label">Новое имя пользователя</label>
+            <input class="form-control" name="new_username" 
+                   value="{{ user.username }}" required minlength="3">
+            <div class="form-text">Минимум 3 символа</div>
+          </div>
+          <button type="submit" class="btn btn-primary">Изменить имя</button>
+        </form>
+      </div>
+    </div>
+    
+    <!-- Смена пароля -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5 class="mb-0">Изменить пароль</h5>
+      </div>
+      <div class="card-body">
+        <form method="post">
+          <input type="hidden" name="action" value="change_password">
+          <div class="mb-3">
+            <label class="form-label">Текущий пароль</label>
+            <input class="form-control" type="password" name="current_password" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Новый пароль</label>
+            <input class="form-control" type="password" name="new_password" 
+                   required minlength="4">
+            <div class="form-text">Минимум 4 символа</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Подтвердите новый пароль</label>
+            <input class="form-control" type="password" name="confirm_password" required>
+          </div>
+          <button type="submit" class="btn btn-warning">Изменить пароль</button>
+        </form>
+      </div>
+    </div>
+    
+    <a href="/" class="btn btn-secondary">← Назад к дашборду</a>
+  </div>
+</div>
+
+<script>
+// Проверка совпадения паролей
+document.addEventListener('DOMContentLoaded', function() {
+  const newPass = document.querySelector('input[name="new_password"]');
+  const confirmPass = document.querySelector('input[name="confirm_password"]');
+  
+  function checkPasswords() {
+    if (newPass.value && confirmPass.value) {
+      if (newPass.value === confirmPass.value) {
+        confirmPass.setCustomValidity('');
+        confirmPass.classList.remove('is-invalid');
+        confirmPass.classList.add('is-valid');
+      } else {
+        confirmPass.setCustomValidity('Пароли не совпадают');
+        confirmPass.classList.remove('is-valid');
+        confirmPass.classList.add('is-invalid');
+      }
+    }
+  }
+  
+  newPass.addEventListener('input', checkPasswords);
+  confirmPass.addEventListener('input', checkPasswords);
+});
+</script>
+{% endblock %}

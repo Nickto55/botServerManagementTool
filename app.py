@@ -5,7 +5,7 @@ from werkzeug.utils import secure_filename
 
 from config import cfg
 from auth import bp_auth, login_required, init_db, ensure_admin
-from docker_api import list_bots, start_bot, stop_bot, restart_bot, remove_bot, create_bot_from_repo, ensure_network
+from docker_api import list_bots, start_bot, stop_bot, restart_bot, remove_bot, create_bot_from_repo, ensure_network, create_workspace, list_workspaces, get_available_images
 from terminal_manager import start_terminal_session, handle_terminal_input, close_session
 
 app = Flask(__name__)
@@ -37,7 +37,8 @@ with app.app_context():
 @login_required
 def dashboard():
     bots = list_bots()
-    return render_template('dashboard.html', bots=bots)
+    workspaces = list_workspaces()
+    return render_template('dashboard.html', bots=bots, workspaces=workspaces)
 
 
 @app.route('/bots/create', methods=['POST'])
@@ -52,6 +53,43 @@ def create_bot():
         return jsonify({'status': 'ok', 'container_id': cid})
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 400
+
+
+@app.route('/workspace/create', methods=['GET', 'POST'])
+@login_required
+def create_workspace_page():
+    if request.method == 'POST':
+        data = request.form or request.json or {}
+        workspace_name = data.get('workspace_name', '').strip()
+        base_image = data.get('base_image', '').strip()
+        
+        # Порты (optional)
+        port_mappings = {}
+        if data.get('port_internal') and data.get('port_external'):
+            try:
+                port_mappings[str(data.get('port_internal'))] = int(data.get('port_external'))
+            except (ValueError, TypeError):
+                pass
+        
+        try:
+            container_id = create_workspace(
+                workspace_name=workspace_name,
+                base_image=base_image if base_image else None,
+                port_mappings=port_mappings if port_mappings else None
+            )
+            if request.content_type and 'application/json' in request.content_type:
+                return jsonify({'status': 'ok', 'container_id': container_id})
+            else:
+                return redirect(url_for('dashboard'))
+        except Exception as e:
+            if request.content_type and 'application/json' in request.content_type:
+                return jsonify({'status': 'error', 'error': str(e)}), 400
+            else:
+                return render_template('create_workspace.html', 
+                                     error=str(e),
+                                     available_images=get_available_images())
+    
+    return render_template('create_workspace.html', available_images=get_available_images())
 
 
 @app.route('/bots/<name>/<action>', methods=['POST'])

@@ -31,6 +31,33 @@ class User(Base):
 
     def verify(self, password: str) -> bool:
         return bcrypt.checkpw(password.encode(), self.password_hash.encode())
+    
+    def change_password(self, new_password: str):
+        """Изменить пароль пользователя"""
+        db = SessionLocal()
+        try:
+            salt = bcrypt.gensalt(rounds=cfg.BCRYPT_ROUNDS)
+            new_hash = bcrypt.hashpw(new_password.encode(), salt).decode()
+            self.password_hash = new_hash
+            db.merge(self)
+            db.commit()
+        finally:
+            db.close()
+    
+    def change_username(self, new_username: str):
+        """Изменить имя пользователя"""
+        db = SessionLocal()
+        try:
+            # Проверяем, что новое имя не занято
+            existing = db.execute(select(User).where(User.username == new_username)).scalar_one_or_none()
+            if existing and existing.id != self.id:
+                raise ValueError('Пользователь с таким именем уже существует')
+            
+            self.username = new_username
+            db.merge(self)
+            db.commit()
+        finally:
+            db.close()
 
 
 def init_db():
@@ -41,6 +68,16 @@ def get_user_by_username(username: str):
     db = SessionLocal()
     try:
         stmt = select(User).where(User.username == username)
+        res = db.execute(stmt).scalar_one_or_none()
+        return res
+    finally:
+        db.close()
+
+
+def get_user_by_id(user_id: int):
+    db = SessionLocal()
+    try:
+        stmt = select(User).where(User.id == user_id)
         res = db.execute(stmt).scalar_one_or_none()
         return res
     finally:
@@ -77,6 +114,56 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for('auth.login'))
+
+
+@bp_auth.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    user_id = session.get('user_id')
+    db = SessionLocal()
+    try:
+        user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+        if not user:
+            flash('Пользователь не найден', 'danger')
+            return redirect(url_for('auth.logout'))
+        
+        if request.method == 'POST':
+            action = request.form.get('action')
+            
+            if action == 'change_password':
+                current_password = request.form.get('current_password', '')
+                new_password = request.form.get('new_password', '')
+                confirm_password = request.form.get('confirm_password', '')
+                
+                if not user.verify(current_password):
+                    flash('Неверный текущий пароль', 'danger')
+                elif len(new_password) < 4:
+                    flash('Пароль должен содержать минимум 4 символа', 'danger')
+                elif new_password != confirm_password:
+                    flash('Пароли не совпадают', 'danger')
+                else:
+                    user.change_password(new_password)
+                    flash('Пароль успешно изменён', 'success')
+            
+            elif action == 'change_username':
+                new_username = request.form.get('new_username', '').strip()
+                
+                if len(new_username) < 3:
+                    flash('Имя пользователя должно содержать минимум 3 символа', 'danger')
+                else:
+                    try:
+                        user.change_username(new_username)
+                        session['username'] = new_username
+                        flash('Имя пользователя успешно изменено', 'success')
+                    except ValueError as e:
+                        flash(str(e), 'danger')
+        
+        # Обновляем объект user после возможных изменений
+        db.refresh(user)
+        return render_template('profile.html', user=user)
+    
+    finally:
+        db.close()
 
 
 # Utility to ensure an admin user exists (called from install script or startup)
