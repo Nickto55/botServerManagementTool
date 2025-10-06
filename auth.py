@@ -1,4 +1,6 @@
 import os
+import re
+import logging
 import bcrypt
 from functools import wraps
 from flask import Blueprint, request, session, redirect, url_for, render_template, flash
@@ -85,6 +87,7 @@ def get_user_by_id(user_id: int):
 
 # Blueprint
 bp_auth = Blueprint('auth', __name__)
+logger = logging.getLogger(__name__)
 
 
 def login_required(f):

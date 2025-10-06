@@ -195,17 +195,148 @@ def get_available_images() -> List[str]:
         
         # Добавляем популярные образы
         popular_images = [
+            # Python окружения
             'python:3.11-slim',
             'python:3.12-slim', 
+            'python:3.13-slim',
+            'python:3.11-alpine',
+            'jupyter/base-notebook',
+            'jupyter/scipy-notebook',
+            
+            # Node.js окружения
             'node:18-alpine',
             'node:20-alpine',
+            'node:22-alpine',
+            'node:18-slim',
+            
+            # Веб-разработка
+            'nginx:alpine',
+            'nginx:latest',
+            'httpd:alpine',
+            'php:8.2-apache',
+            'php:8.3-fpm-alpine',
+            
+            # Базовые системы
             'ubuntu:22.04',
-            'alpine:latest'
+            'ubuntu:24.04', 
+            'debian:bookworm-slim',
+            'alpine:latest',
+            'centos:stream9',
+            
+            # Базы данных
+            'postgres:15-alpine',
+            'postgres:16-alpine',
+            'mysql:8.0',
+            'redis:alpine',
+            'mongodb:latest',
+            
+            # DevOps и инструменты
+            'golang:1.21-alpine',
+            'golang:1.22-alpine',
+            'rust:alpine',
+            'openjdk:17-alpine',
+            'openjdk:21-alpine',
+            
+            # Data Science
+            'tensorflow/tensorflow:latest',
+            'pytorch/pytorch:latest',
+            'continuumio/miniconda3'
         ]
         
         return list(set(image_names + popular_images))
     except Exception:
         return ['python:3.11-slim', 'ubuntu:22.04', 'alpine:latest']
+
+
+def get_workspace_templates():
+    """Получить список шаблонов workspace с предустановками"""
+    return {
+        'python-bot': {
+            'name': 'Python Bot Development',
+            'image': 'python:3.12-slim',
+            'description': 'Готовое окружение для разработки ботов на Python',
+            'packages': ['pip install flask flask-socketio requests python-telegram-bot discord.py'],
+            'setup_commands': [
+                'apt-get update && apt-get install -y git curl nano vim',
+                'mkdir -p /workspace/src /workspace/logs /workspace/config',
+                'echo "# Bot Development Workspace" > /workspace/README.md'
+            ]
+        },
+        'web-fullstack': {
+            'name': 'Full-Stack Web Development',
+            'image': 'node:20-alpine',
+            'description': 'Node.js + Python + базы данных',
+            'packages': ['npm install -g express react vue @angular/cli'],
+            'setup_commands': [
+                'apk add --no-cache python3 py3-pip git curl nano',
+                'mkdir -p /workspace/{frontend,backend,database}',
+                'npm init -y'
+            ]
+        },
+        'data-science': {
+            'name': 'Data Science & ML',
+            'image': 'jupyter/scipy-notebook',
+            'description': 'Jupyter + pandas + sklearn + tensorflow',
+            'packages': ['pip install pandas numpy matplotlib seaborn scikit-learn tensorflow'],
+            'setup_commands': [
+                'mkdir -p /workspace/{data,notebooks,models,scripts}',
+                'jupyter notebook --generate-config'
+            ]
+        },
+        'devops': {
+            'name': 'DevOps Tools',
+            'image': 'alpine:latest',
+            'description': 'Docker + git + инструменты CI/CD',
+            'packages': [],
+            'setup_commands': [
+                'apk add --no-cache git curl wget bash vim nano docker-cli',
+                'mkdir -p /workspace/{scripts,configs,deployments}',
+                'echo "DevOps Workspace ready" > /workspace/status.txt'
+            ]
+        }
+    }
+
+
+def create_workspace_from_template(template_key: str, workspace_name: str, port_mappings=None):
+    """Создать workspace из шаблона с предустановками"""
+    templates = get_workspace_templates()
+    if template_key not in templates:
+        raise ValueError(f"Неизвестный шаблон: {template_key}")
+    
+    template = templates[template_key]
+    
+    # Создаем базовый workspace
+    container_id = create_workspace(
+        workspace_name=workspace_name,
+        base_image=template['image'],
+        port_mappings=port_mappings
+    )
+    
+    try:
+        cli = get_client()
+        container = cli.containers.get(container_id)
+        
+        # Выполняем команды настройки
+        for cmd in template['setup_commands']:
+            try:
+                result = container.exec_run(cmd, workdir='/workspace')
+                print(f"Setup command result: {result.output.decode()}")
+            except Exception as e:
+                print(f"Setup command failed: {e}")
+        
+        # Устанавливаем пакеты
+        for package_cmd in template['packages']:
+            try:
+                result = container.exec_run(package_cmd, workdir='/workspace')
+                print(f"Package install result: {result.output.decode()}")
+            except Exception as e:
+                print(f"Package install failed: {e}")
+                
+        return container_id
+        
+    except Exception as e:
+        print(f"Template setup failed: {e}")
+        return container_id  # Возвращаем базовый workspace
 
 
 def exec_command(container_name: str, cmd: str):

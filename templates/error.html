@@ -1,0 +1,33 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<div class="container mt-5">
+  <div class="row justify-content-center">
+    <div class="col-md-6 text-center">
+      <div class="card border-danger">
+        <div class="card-body">
+          <h1 class="display-1 text-danger">{{ error_code }}</h1>
+          <h4 class="card-title text-danger">Упс! Что-то пошло не так</h4>
+          <p class="card-text">{{ error_message }}</p>
+          
+          {% if error_code == 404 %}
+            <p class="text-muted">Возможно, страница была перемещена или удалена.</p>
+          {% elif error_code == 500 %}
+            <p class="text-muted">Мы работаем над устранением этой проблемы.</p>
+          {% endif %}
+          
+          <div class="mt-4">
+            <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+              <i class="fas fa-home"></i> На главную
+            </a>
+            <button onclick="history.back()" class="btn btn-outline-secondary">
+              <i class="fas fa-arrow-left"></i> Назад
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
