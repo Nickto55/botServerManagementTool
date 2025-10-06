@@ -9,8 +9,6 @@ import validators
 
 from config import cfg
 from auth import bp_auth, login_required, init_db, ensure_admin
-from docker_api import list_bots, start_bot, stop_bot, restart_bot, remove_bot, create_bot_from_repo, ensure_network, create_workspace, list_workspaces, get_available_images
-from terminal_manager import start_terminal_session, handle_terminal_input, close_session
 
 app = Flask(__name__)
 app.config.from_object('config.Config')
@@ -27,6 +25,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Импортируем Docker API с обработкой ошибок
+try:
+    from docker_api import list_bots, start_bot, stop_bot, restart_bot, remove_bot, create_bot_from_repo, ensure_network, create_workspace, list_workspaces, get_available_images
+    DOCKER_AVAILABLE = True
+except Exception as e:
+    logger.warning(f'Docker API недоступно: {e}')
+    DOCKER_AVAILABLE = False
+    # Создаем заглушки для Docker функций
+    def list_bots(): return [{'id': '-', 'name': 'Docker недоступен', 'status': 'error', 'image': '-', 'created': '-'}]
+    def start_bot(name): raise RuntimeError("Docker недоступен")
+    def stop_bot(name): raise RuntimeError("Docker недоступен")
+    def restart_bot(name): raise RuntimeError("Docker недоступен")
+    def remove_bot(name, force=False): raise RuntimeError("Docker недоступен")
+    def create_bot_from_repo(*args, **kwargs): raise RuntimeError("Docker недоступен")
+    def ensure_network(): pass  # Не падаем, просто пропускаем
+    def create_workspace(*args, **kwargs): raise RuntimeError("Docker недоступен")
+    def list_workspaces(): return []
+    def get_available_images(): return []
+
+try:
+    from terminal_manager import start_terminal_session, handle_terminal_input, close_session
+    TERMINAL_AVAILABLE = True
+except Exception as e:
+    logger.warning(f'Terminal manager недоступен: {e}')
+    TERMINAL_AVAILABLE = False
+    def start_terminal_session(*args): pass
+    def handle_terminal_input(*args): pass
+    def close_session(*args): pass
+
 # Rate limiting
 limiter = Limiter(
     app,
@@ -38,21 +65,59 @@ socketio = SocketIO(app, async_mode='eventlet')
 
 ALLOWED_FRONTEND_EXT = {'.html', '.css', '.js'}
 
+# Глобальная переменная для отслеживания успешности инициализации
+startup_success = False
+
 
 def startup():
+    """Инициализация приложения с обработкой ошибок"""
+    errors = []
+    
     try:
+        logger.info("Инициализация базы данных...")
         init_db()
-        ensure_admin()
-        ensure_network()
-        print('Startup complete')
+        logger.info("База данных инициализирована успешно")
     except Exception as e:
-        print(f'Startup error: {e}')
-        # Не падаем на старте, позволяем приложению работать
+        error_msg = f'Ошибка инициализации БД: {e}'
+        logger.error(error_msg)
+        errors.append(error_msg)
+    
+    try:
+        logger.info("Проверка/создание администратора...")
+        ensure_admin()
+        logger.info("Администратор настроен успешно")
+    except Exception as e:
+        error_msg = f'Ошибка настройки администратора: {e}'
+        logger.error(error_msg)
+        errors.append(error_msg)
+    
+    try:
+        logger.info("Проверка Docker сети...")
+        ensure_network()
+        logger.info("Docker сеть настроена успешно")
+    except Exception as e:
+        error_msg = f'Ошибка Docker сети: {e}'
+        logger.warning(error_msg)  # Warning, а не Error, так как Docker может быть недоступен
+        errors.append(error_msg)
+    
+    if errors:
+        logger.warning(f'Startup завершен с ошибками: {len(errors)} проблем')
+        for error in errors:
+            logger.warning(f'  - {error}')
+    else:
+        logger.info('Startup завершен успешно')
+    
+    return len(errors) == 0
 
 
 # Вызываем startup при инициализации
-with app.app_context():
-    startup()
+startup_success = False
+try:
+    with app.app_context():
+        startup_success = startup()
+except Exception as e:
+    logger.critical(f'Критическая ошибка при инициализации: {e}')
+    # Продолжаем работу, но отмечаем проблему
 
 
 @app.route('/')
@@ -244,7 +309,29 @@ def on_disconnect():
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok'}), 200
+    status = {
+        'status': 'ok' if startup_success else 'warning',
+        'startup_success': startup_success,
+        'timestamp': os.path.getmtime(__file__) if os.path.exists(__file__) else None
+    }
+    
+    # Проверяем основные компоненты
+    try:
+        from docker_api import list_bots
+        list_bots()
+        status['docker'] = 'ok'
+    except Exception as e:
+        status['docker'] = f'error: {str(e)}'
+    
+    try:
+        from auth import SessionLocal
+        db = SessionLocal()
+        db.close()
+        status['database'] = 'ok'
+    except Exception as e:
+        status['database'] = f'error: {str(e)}'
+    
+    return jsonify(status), 200
 
 
 # Обработчики ошибок
@@ -268,10 +355,18 @@ def ratelimit_handler(e):
 
 
 if __name__ == '__main__':
-    # Создаем папку для логов
-    os.makedirs('logs', exist_ok=True)
+    # Создаем необходимые папки
+    try:
+        os.makedirs('logs', exist_ok=True)
+        os.makedirs('bots', exist_ok=True)
+        os.makedirs('uploads', exist_ok=True)
+    except Exception as e:
+        print(f'Ошибка создания папок: {e}')
     
     logger.info('Starting Bot Manager on 0.0.0.0:5000')
+    if not startup_success:
+        logger.warning('Приложение запускается с ошибками инициализации')
+    
     try:
         socketio.run(app, host='0.0.0.0', port=5000, debug=False)
     except Exception as e:
