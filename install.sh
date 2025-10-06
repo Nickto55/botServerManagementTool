@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 set -e
 
-# Usage: ./install.sh (interactive) or provide env vars SECRET_KEY, ADMIN_USER, ADMIN_PASS
+# Usage: PUBLIC_PORT=8080 SECRET_KEY=... ADMIN_USER=... ADMIN_PASS=... bash install.sh
+# Если PUBLIC_PORT не задан, скрипт спросит порт (по умолчанию 80)
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run as root (sudo)."; exit 1; fi
+
+# --- Порт ---
+if [ -z "${PUBLIC_PORT}" ]; then
+  read -p "Введите порт для веб-интерфейса [80]: " PUBLIC_PORT
+fi
+PUBLIC_PORT=${PUBLIC_PORT:-80}
+echo "Используем публичный порт: ${PUBLIC_PORT}" 
 
 apt update
 apt install -y python3 python3-venv python3-pip git docker.io nginx
@@ -17,12 +25,13 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Create .env
+# Create .env (добавим PUBLIC_PORT для справки)
 if [ ! -f .env ]; then
   cat > .env <<EOF
 SECRET_KEY=${SECRET_KEY:-$(openssl rand -hex 16)}
 ADMIN_USER=${ADMIN_USER:-admin}
 ADMIN_PASS=${ADMIN_PASS:-admin}
+PUBLIC_PORT=${PUBLIC_PORT}
 EOF
 fi
 
@@ -51,10 +60,10 @@ EOF
 systemctl daemon-reload
 systemctl enable --now botmanager.service
 
-# Nginx config (разворачиваем только $APP_DIR, остальные переменные экранируем)
+# Nginx config
 cat > /etc/nginx/sites-available/botmanager.conf <<EOF
 server {
-    listen 80;
+    listen ${PUBLIC_PORT};
     server_name _;
 
     proxy_send_timeout 300;
@@ -93,4 +102,15 @@ rm -f /etc/nginx/sites-enabled/default || true
 nginx -t
 systemctl restart nginx
 
+IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [ -z "$IP_ADDR" ]; then
+  IP_ADDR=$(curl -s https://ifconfig.me || echo "<SERVER_IP>")
+fi
+if [ "$PUBLIC_PORT" = "80" ]; then
+  APP_URL="http://${IP_ADDR}/"
+else
+  APP_URL="http://${IP_ADDR}:${PUBLIC_PORT}/"
+fi
+
 echo "Installation complete. Login with ADMIN_USER/ADMIN_PASS."
+echo "URL: ${APP_URL}"
