@@ -7,20 +7,21 @@ from docker.models.containers import Container
 from docker.utils.socket import frames_iter
 from docker import errors as docker_errors
 
-from docker_api import client
+from docker_api import get_client
 
 TERMINAL_SESSIONS: Dict[str, dict] = {}
 
 
 def open_exec_socket(container: Container, cmd: str = '/bin/bash'):
-    exec_id = client.api.exec_create(container.id, cmd, tty=True, stdin=True)
-    sock = client.api.exec_start(exec_id, tty=True, socket=True)
+    cli = get_client()
+    exec_id = cli.api.exec_create(container.id, cmd, tty=True, stdin=True)
+    sock = cli.api.exec_start(exec_id, tty=True, socket=True)
     return exec_id, sock
 
 
 def start_terminal_session(sid: str, container_name: str):
     try:
-        container = client.containers.get(container_name)
+        container = get_client().containers.get(container_name)
     except docker_errors.NotFound:
         emit('terminal_output', {'data': f'Контейнер {container_name} не найден\n'}, room=sid)
         return
