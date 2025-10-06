@@ -51,8 +51,8 @@ EOF
 systemctl daemon-reload
 systemctl enable --now botmanager.service
 
-# Nginx config
-cat > /etc/nginx/sites-available/botmanager.conf <<'EOF'
+# Nginx config (разворачиваем только $APP_DIR, остальные переменные экранируем)
+cat > /etc/nginx/sites-available/botmanager.conf <<EOF
 server {
     listen 80;
     server_name _;
@@ -62,9 +62,9 @@ server {
 
     location /socket.io/ {
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
+        proxy_set_header Host \$host;
         proxy_pass http://127.0.0.1:5000/socket.io/;
     }
 
@@ -76,10 +76,14 @@ server {
         alias $APP_DIR/uploads/;
     }
 
+    location /health {
+        proxy_pass http://127.0.0.1:5000/health;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:5000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
 }
 EOF
