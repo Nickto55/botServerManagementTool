@@ -1,0 +1,11 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h5>Терминал контейнера: {{ container }}</h5>
+<div class="mb-2"><a class="btn btn-secondary btn-sm" href="/">← Назад</a></div>
+<pre id="terminal" style="background:#000;color:#0f0;padding:10px;height:400px;overflow:auto;"></pre>
+<input id="termInput" class="form-control" placeholder="Введите команду и Enter">
+<script src="/static/js/terminal.js"></script>
+<script>
+  initTerminal('{{ container }}');
+</script>
+{% endblock %}

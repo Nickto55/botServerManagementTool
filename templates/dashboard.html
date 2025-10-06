@@ -1,0 +1,61 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h3>Боты</h3>
+<div class="card mb-4 p-3">
+  <form id="createBotForm" class="row g-2">
+    <div class="col-md-4">
+      <input class="form-control" name="git_url" placeholder="Git URL" required>
+    </div>
+    <div class="col-md-3">
+      <input class="form-control" name="bot_name" placeholder="Имя (опционально)">
+    </div>
+    <div class="col-md-2">
+      <input class="form-control" name="branch" placeholder="Branch (опц.)">
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-success w-100" type="submit">Создать</button>
+    </div>
+  </form>
+</div>
+<table class="table table-striped">
+  <thead>
+    <tr><th>Имя</th><th>Статус</th><th>Образ</th><th>Действия</th></tr>
+  </thead>
+  <tbody id="botsTbody">
+    {% for b in bots %}
+      <tr data-name="{{b.name}}">
+        <td><a href="/terminal/{{b.name}}">{{ b.name }}</a></td>
+        <td>{{ b.status }}</td>
+        <td>{{ b.image }}</td>
+        <td>
+          <button class="btn btn-sm btn-outline-success act" data-act="start">▶</button>
+          <button class="btn btn-sm btn-outline-warning act" data-act="stop">■</button>
+          <button class="btn btn-sm btn-outline-info act" data-act="restart">↻</button>
+          <button class="btn btn-sm btn-outline-danger act" data-act="remove">✖</button>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<script>
+  document.getElementById('createBotForm').addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const obj = Object.fromEntries(fd.entries());
+    const res = await fetch('/bots/create', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(obj)});
+    const data = await res.json();
+    if(data.status==='ok'){ location.reload(); } else { alert(data.error); }
+  });
+  document.querySelectorAll('.act').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const tr = btn.closest('tr');
+      const name = tr.dataset.name;
+      const act = btn.dataset.act;
+      if(act==='remove' && !confirm('Удалить контейнер?')) return;
+      const res = await fetch(`/bots/${name}/${act}`, {method:'POST'});
+      const data = await res.json();
+      if(data.status==='ok'){ location.reload(); } else { alert(data.error); }
+    });
+  });
+</script>
+{% endblock %}

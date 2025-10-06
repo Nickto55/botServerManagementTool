@@ -1,0 +1,11 @@
+{% extends 'layout.html' %}
+{% block content %}
+<h4>Загрузка HTML/CSS/JS для override</h4>
+<form method="post" enctype="multipart/form-data">
+  <div class="mb-3">
+    <input class="form-control" type="file" name="file" required>
+  </div>
+  <button class="btn btn-primary">Загрузить</button>
+</form>
+<p class="mt-3 text-muted">Файлы сохраняются в uploads/ и могут быть отданы вручную через /override/&lt;filename&gt;.</p>
+{% endblock %}
