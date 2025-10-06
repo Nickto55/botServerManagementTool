@@ -17,11 +17,20 @@ socketio = SocketIO(app, async_mode='eventlet')
 ALLOWED_FRONTEND_EXT = {'.html', '.css', '.js'}
 
 
-@app.before_first_request
 def startup():
-    init_db()
-    ensure_admin()
-    ensure_network()
+    try:
+        init_db()
+        ensure_admin()
+        ensure_network()
+        print('Startup complete')
+    except Exception as e:
+        print(f'Startup error: {e}')
+        # Не падаем на старте, позволяем приложению работать
+
+
+# Вызываем startup при инициализации
+with app.app_context():
+    startup()
 
 
 @app.route('/')
@@ -78,6 +87,8 @@ def upload_frontend():
         if 'file' not in request.files:
             return 'No file', 400
         f = request.files['file']
+        if not f.filename:
+            return 'No file selected', 400
         ext = os.path.splitext(f.filename)[1].lower()
         if ext not in ALLOWED_FRONTEND_EXT:
             return 'Недопустимое расширение', 400
@@ -123,4 +134,11 @@ def health():
 
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000)
+    print(f'Starting Bot Manager on 0.0.0.0:5000')
+    try:
+        socketio.run(app, host='0.0.0.0', port=5000, debug=False)
+    except Exception as e:
+        print(f'FATAL ERROR: {e}')
+        import traceback
+        traceback.print_exc()
+        exit(1)

@@ -1,0 +1,50 @@
+/* Дополнительные стили для Bot Manager */
+.terminal-container {
+  background: #000;
+  color: #0f0;
+  font-family: 'Courier New', monospace;
+  padding: 10px;
+  border-radius: 4px;
+  height: 400px;
+  overflow-y: auto;
+  border: 1px solid #333;
+}
+
+.bot-status-running { color: #28a745; }
+.bot-status-exited { color: #dc3545; }
+.bot-status-created { color: #ffc107; }
+
+.card-bot {
+  transition: box-shadow 0.2s;
+}
+
+.card-bot:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.btn-group-actions .btn {
+  margin: 0 2px;
+}
+
+.upload-zone {
+  border: 2px dashed #dee2e6;
+  padding: 20px;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+.upload-zone:hover {
+  border-color: #007bff;
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.status-running { background: #28a745; }
+.status-stopped { background: #dc3545; }
+.status-paused { background: #ffc107; }

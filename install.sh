@@ -12,6 +12,16 @@ if [ -z "${PUBLIC_PORT}" ]; then
   read -p "Введите порт для веб-интерфейса [80]: " PUBLIC_PORT
 fi
 PUBLIC_PORT=${PUBLIC_PORT:-80}
+
+if [ "$PUBLIC_PORT" = "443" ]; then
+  echo "WARNING: Порт 443 предназначен для HTTPS. Для HTTP рекомендуется порт 80 или 8080."
+  read -p "Продолжить с портом 443? (y/N): " confirm
+  if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "Установка прервана."
+    exit 1
+  fi
+fi
+
 echo "Используем публичный порт: ${PUBLIC_PORT}" 
 
 apt update
@@ -104,15 +114,39 @@ rm -f /etc/nginx/sites-enabled/default || true
 nginx -t
 systemctl restart nginx
 
+# Firewall configuration
+ufw --force enable || true
+ufw allow ${PUBLIC_PORT}/tcp
+if [ "$PUBLIC_PORT" != "22" ]; then
+  ufw allow 22/tcp  # SSH always allowed
+fi
+ufw --force reload || true
+echo "Firewall: порт ${PUBLIC_PORT} открыт для веб-доступа"
+
 IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
 if [ -z "$IP_ADDR" ]; then
-  IP_ADDR=$(curl -s https://ifconfig.me || echo "<SERVER_IP>")
+  IP_ADDR=$(curl -s https://ifconfig.me 2>/dev/null || echo "<SERVER_IP>")
 fi
 if [ "$PUBLIC_PORT" = "80" ]; then
   APP_URL="http://${IP_ADDR}/"
+elif [ "$PUBLIC_PORT" = "443" ]; then
+  APP_URL="https://${IP_ADDR}/" 
 else
   APP_URL="http://${IP_ADDR}:${PUBLIC_PORT}/"
 fi
 
 echo "Installation complete. Login with ADMIN_USER/ADMIN_PASS."
 echo "URL: ${APP_URL}"
+
+# Диагностика
+echo "\n=== Диагностика ==="
+echo "Статус службы:"
+systemctl is-active botmanager || echo "ОШИБКА: Служба не запущена"
+echo "Порт Flask (5000):"
+ss -tlnp | grep :5000 || echo "ОШИБКА: Flask не слушает порт 5000"
+echo "Порт Nginx (${PUBLIC_PORT}):"
+ss -tlnp | grep :${PUBLIC_PORT} || echo "ОШИБКА: Nginx не слушает порт ${PUBLIC_PORT}"
+
+echo "\nДля диагностики ошибок:" 
+echo "  journalctl -u botmanager -n 20 --no-pager"
+echo "  systemctl status botmanager"
