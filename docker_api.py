@@ -13,6 +13,26 @@ from config import cfg
 _client = None
 
 
+def normalize_docker_name(name: str) -> str:
+    """
+    Нормализовать имя для использования в Docker
+    - Приводит к нижнему регистру
+    - Заменяет недопустимые символы на дефисы
+    - Убирает множественные дефисы
+    """
+    import re
+    # Приводим к нижнему регистру и заменяем недопустимые символы
+    normalized = re.sub(r'[^a-z0-9_.-]', '-', name.lower())
+    # Убираем множественные дефисы
+    normalized = re.sub(r'-+', '-', normalized)
+    # Убираем дефисы в начале и конце
+    normalized = normalized.strip('-')
+    # Docker имена не могут быть пустыми или начинаться с цифры
+    if not normalized or normalized[0].isdigit():
+        normalized = f"bot-{normalized}"
+    return normalized
+
+
 def get_client():
     global _client
     if _client is None:
@@ -65,11 +85,18 @@ def remove_bot(name: str, force: bool = False):
 
 
 def create_bot_from_repo(git_url: str, bot_name: Optional[str] = None, branch: Optional[str] = None):
+    # Получаем исходное имя бота
     if not bot_name:
         bot_name = os.path.splitext(os.path.basename(git_url.rstrip('/')))[0]
+    
+    # Создаем директорию с исходным именем (для файловой системы)
     bot_dir = os.path.join(cfg.BOTS_DIR, bot_name)
     if os.path.exists(bot_dir):
         raise ValueError('Каталог бота уже существует')
+
+    # Но для Docker используем нормализованные имена
+    docker_bot_name = normalize_docker_name(bot_name)
+    docker_image_tag = f'bot-{docker_bot_name}'
 
     tmp_dir = tempfile.mkdtemp()
     try:
@@ -79,17 +106,18 @@ def create_bot_from_repo(git_url: str, bot_name: Optional[str] = None, branch: O
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     dockerfile_path = os.path.join(bot_dir, 'Dockerfile')
-    image_tag = f'bot_{bot_name}:latest'
     cli = get_client()
+    
     if os.path.exists(dockerfile_path):
-        cli.images.build(path=bot_dir, tag=image_tag)
+        cli.images.build(path=bot_dir, tag=docker_image_tag)
     else:
         base_bot_dockerfile = os.path.join(os.path.dirname(__file__), 'Dockerfile.bot')
-        cli.images.build(path=os.path.dirname(base_bot_dockerfile), dockerfile=base_bot_dockerfile, tag=image_tag, buildargs={'BOT_NAME': bot_name})
+        cli.images.build(path=os.path.dirname(base_bot_dockerfile), dockerfile=base_bot_dockerfile, 
+                        tag=docker_image_tag, buildargs={'BOT_NAME': bot_name})
 
     container = cli.containers.run(
-        image_tag,
-        name=bot_name,
+        docker_image_tag,
+        name=docker_bot_name,
         labels={'bot-manager': '1'},
         detach=True,
         network=cfg.DOCKER_BASE_NETWORK,
@@ -116,9 +144,13 @@ def create_workspace(workspace_name: str, base_image: str = None, port_mappings:
     if not workspace_name:
         raise ValueError('Имя workspace обязательно')
     
+    # Создаем директорию с исходным именем (для файловой системы)
     workspace_dir = os.path.join(cfg.BOTS_DIR, workspace_name)
     if os.path.exists(workspace_dir):
         raise ValueError('Каталог workspace уже существует')
+    
+    # Но для Docker используем нормализованное имя
+    docker_workspace_name = normalize_docker_name(workspace_name)
     
     os.makedirs(workspace_dir)
     
@@ -143,7 +175,7 @@ def create_workspace(workspace_name: str, base_image: str = None, port_mappings:
     
     container = cli.containers.run(
         image_name,
-        name=workspace_name,
+        name=docker_workspace_name,
         labels={'bot-manager': '1', 'workspace': '1'},
         detach=True,
         network=cfg.DOCKER_BASE_NETWORK,
