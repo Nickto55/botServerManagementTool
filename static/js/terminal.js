@@ -2,17 +2,32 @@ function initTerminal(containerName) {
     const termEl = document.getElementById('terminal');
     const inputEl = document.getElementById('termInput');
     const promptEl = document.getElementById('terminalPrompt');
-    // Один глобальный socket для страницы
+
+    if (!termEl || !inputEl) {
+        console.error('[terminal] elements not found');
+        return;
+    }
+
     if (!window.socket) {
         console.log('[terminal] creating new socket connection...');
         window.socket = io({transports:['websocket','polling']});
-        window.socket.on('connect', ()=>console.log('[terminal] socket connected id=', window.socket.id));
-        window.socket.on('disconnect', ()=>console.log('[terminal] socket disconnected'));
-        window.socket.on('connect_error', (err)=>console.error('[terminal] socket connect_error', err));
     } else {
         console.log('[terminal] reusing existing socket id=', window.socket.id);
     }
     const socket = window.socket;
+
+    // Подписки СОЗДАЕМ раньше, чем отправляем terminal_start
+    socket.off('terminal_output');
+    socket.off('terminal_status');
+    socket.off('terminal_command_started');
+    socket.off('terminal_command_result');
+    socket.off('terminal_history_full');
+
+    socket.on('connect', ()=>{
+        console.log('[terminal] socket connected id=', socket.id);
+    });
+    socket.on('disconnect', ()=>console.log('[terminal] socket disconnected'));
+    socket.on('connect_error', (err)=>console.error('[terminal] socket connect_error', err));
     
     let commandHistory = [];
     let historyIndex = -1;
@@ -21,31 +36,53 @@ function initTerminal(containerName) {
     
     console.log('Initializing terminal for:', containerName);
     
-    // Подключение к серверу
-    socket.on('connect', () => {
-        console.log('Socket connected, ID:', socket.id);
-        appendOutput('=== Подключение к ' + containerName + ' ===\n', 'cmd-success');
-    socket.emit('terminal_start', {container_id: containerName});
-    });
-    
-    // Получение вывода
     socket.on('terminal_output', (data) => {
-        console.log('Received output:', data);
+        console.log('[terminal] output event:', data);
         if (data && data.data) {
             appendOutput(data.data);
         }
     });
+
+    socket.on('terminal_status', (data) => {
+        console.log('[terminal] status event:', data);
+        const dockerLine = document.getElementById('dockerStatusLine');
+        const containerLine = document.getElementById('containerStatusLine');
+        if (dockerLine && data) {
+            dockerLine.textContent = `Docker: ${data.docker}` + (data.error?` (error: ${data.error})`:'' );
+        }
+        if (containerLine && data) {
+            if (data.container === 'present') {
+                containerLine.textContent = `Container: ${data.container_running ? 'running' : 'stopped'}${data.image? ' image=' + data.image: ''}`;
+                containerLine.style.color = data.container_running ? '#4ec9b0' : '#ffab70';
+            } else if (data.container === 'missing') {
+                containerLine.textContent = 'Container: missing';
+                containerLine.style.color = '#f44747';
+            } else {
+                containerLine.textContent = 'Container: unknown';
+                containerLine.style.color = '#aaa';
+            }
+        }
+    });
+
+    socket.on('terminal_command_started', (data) => {
+        console.log('[terminal] command started', data);
+    });
+    socket.on('terminal_command_result', (data) => {
+        console.log('[terminal] command result', data);
+    });
+    socket.on('terminal_history_full', (data) => {
+        console.log('[terminal] history full', data);
+    });
+
+    // Теперь инициируем подключение сессии
+    appendOutput('=== Подключение к ' + containerName + ' ===\n', 'cmd-success');
+    socket.emit('terminal_start', {container_id: containerName});
     
-    // Обработка ошибки подключения
     socket.on('connect_error', (error) => {
-        console.error('Connection error:', error);
         appendOutput('\n[Ошибка подключения: ' + error + ']\n', 'cmd-error');
     });
-    
-    // Обработка отключения
     socket.on('disconnect', () => {
-        console.log('Socket disconnected');
-        appendOutput('\n[Соединение разорвано. Обновите страницу для переподключения]\n', 'cmd-error');
+        appendOutput('\n[Соединение разорвано. Обновите страницу]\n', 'cmd-error');
     });
     
     // Функция для добавления вывода с цветовым кодированием
