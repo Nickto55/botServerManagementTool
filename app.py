@@ -422,7 +422,8 @@ def on_terminal_start(data):
         emit('terminal_output', {'data': 'Ошибка: требуется авторизация\n'})
         return
         
-    container = data.get('container')
+    # Поддержка старого и нового ключа
+    container = data.get('container') or data.get('container_id')
     print(f"Terminal start requested for container: {container}")
     emit('terminal_output', {'data': f'Подключение к {container}...\n'})
     start_terminal_session(request.sid, container)
@@ -435,7 +436,13 @@ def on_terminal_input(data):
         emit('terminal_output', {'data': 'Ошибка: требуется авторизация\n'})
         return
         
-    command = data.get('data', '')
+    # data может быть строкой или dict
+    if isinstance(data, str):
+        command = data
+    elif isinstance(data, dict):
+        command = data.get('data', '')
+    else:
+        command = ''
     print(f"Terminal input: {repr(command)}")
     handle_terminal_input(request.sid, command)
 

@@ -2,7 +2,11 @@ function initTerminal(containerName) {
     const termEl = document.getElementById('terminal');
     const inputEl = document.getElementById('termInput');
     const promptEl = document.getElementById('terminalPrompt');
-    const socket = io();
+    // Один глобальный socket для страницы
+    if (!window.socket) {
+        window.socket = io();
+    }
+    const socket = window.socket;
     
     let commandHistory = [];
     let historyIndex = -1;
@@ -15,7 +19,7 @@ function initTerminal(containerName) {
     socket.on('connect', () => {
         console.log('Socket connected, ID:', socket.id);
         appendOutput('=== Подключение к ' + containerName + ' ===\n', 'cmd-success');
-        socket.emit('terminal_start', {container_id: containerName});
+    socket.emit('terminal_start', {container_id: containerName});
     });
     
     // Получение вывода
@@ -84,7 +88,7 @@ function initTerminal(containerName) {
                     
                     // Отправляем команду
                     console.log('Sending command:', command);
-                    socket.emit('terminal_input', command);
+                    socket.emit('terminal_input', {data: command});
                 }
                 
                 inputEl.value = '';
@@ -162,17 +166,19 @@ function sendCommand() {
     
     if (command) {
         console.log('Sending command via button:', command);
-        
-        // Создаем событие Enter для использования существующей логики
-        const enterEvent = new KeyboardEvent('keydown', {
-            key: 'Enter',
-            code: 'Enter',
-            which: 13,
-            keyCode: 13,
-            bubbles: true
-        });
-        
-        inputEl.dispatchEvent(enterEvent);
+        if (window.socket && window.socket.connected) {
+            window.socket.emit('terminal_input', {data: command});
+            // Отобразим локально чтобы пользователь видел немедленно
+            const containerName = document.getElementById('terminalPrompt').textContent.split('@')[1].split(':')[0];
+            const currentUser = 'root';
+            const currentPath = '~';
+            const termEl = document.getElementById('terminal');
+            const span = document.createElement('span');
+            span.className = 'cmd-prompt';
+            span.textContent = `${currentUser}@${containerName}:${currentPath}$ ${command}\n`;
+            termEl.appendChild(span);
+            termEl.scrollTop = termEl.scrollHeight;
+        }
     }
     
     inputEl.focus();
