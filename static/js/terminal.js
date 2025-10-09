@@ -9,21 +9,33 @@ function initTerminal(containerName) {
     let currentPath = '~';
     let currentUser = 'root';
     
+    console.log('Initializing terminal for:', containerName);
+    
     // Подключение к серверу
     socket.on('connect', () => {
-        socket.emit('terminal_start', {container: containerName});
-        appendOutput('Connected to ' + containerName + '\n', 'cmd-success');
-        appendOutput('Type "help" for available commands or start typing...\n\n', 'cmd-info');
+        console.log('Socket connected, ID:', socket.id);
+        appendOutput('=== Подключение к ' + containerName + ' ===\n', 'cmd-success');
+        socket.emit('terminal_start', {container_id: containerName});
     });
     
     // Получение вывода
     socket.on('terminal_output', (data) => {
-        appendOutput(data.data);
+        console.log('Received output:', data);
+        if (data && data.data) {
+            appendOutput(data.data);
+        }
+    });
+    
+    // Обработка ошибки подключения
+    socket.on('connect_error', (error) => {
+        console.error('Connection error:', error);
+        appendOutput('\n[Ошибка подключения: ' + error + ']\n', 'cmd-error');
     });
     
     // Обработка отключения
     socket.on('disconnect', () => {
-        appendOutput('\n[Connection lost. Refresh page to reconnect]\n', 'cmd-error');
+        console.log('Socket disconnected');
+        appendOutput('\n[Соединение разорвано. Обновите страницу для переподключения]\n', 'cmd-error');
     });
     
     // Функция для добавления вывода с цветовым кодированием
@@ -71,7 +83,8 @@ function initTerminal(containerName) {
                     appendOutput(`${currentUser}@${containerName}:${currentPath}$ ${command}\n`, 'cmd-prompt');
                     
                     // Отправляем команду
-                    socket.emit('terminal_input', {data: command + '\n'});
+                    console.log('Sending command:', command);
+                    socket.emit('terminal_input', command);
                 }
                 
                 inputEl.value = '';
@@ -140,4 +153,27 @@ function initTerminal(containerName) {
         // Даем обработать вставку, затем фокусируемся
         setTimeout(() => inputEl.focus(), 10);
     });
+}
+
+// Функция для отправки команды через кнопку
+function sendCommand() {
+    const inputEl = document.getElementById('termInput');
+    const command = inputEl.value.trim();
+    
+    if (command) {
+        console.log('Sending command via button:', command);
+        
+        // Создаем событие Enter для использования существующей логики
+        const enterEvent = new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            which: 13,
+            keyCode: 13,
+            bubbles: true
+        });
+        
+        inputEl.dispatchEvent(enterEvent);
+    }
+    
+    inputEl.focus();
 }

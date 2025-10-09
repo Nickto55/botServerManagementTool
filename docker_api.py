@@ -45,7 +45,7 @@ def get_client():
 
 def list_bots() -> List[Dict]:
     try:
-        containers = get_client().containers.list(all=True, filters={'label': 'bot-manager=1'})
+        containers = get_client().containers.list(all=True)
     except Exception as e:
         return [{'id': '-', 'name': 'ERROR', 'status': f'docker err: {e}', 'image': '-', 'created': '-'}]
     data = []
@@ -61,21 +61,105 @@ def list_bots() -> List[Dict]:
 
 
 def start_bot(name: str):
-    container = get_client().containers.get(name)
-    container.start()
-    return True
+    """Запустить бот с использованием кастомной команды, если она задана"""
+    try:
+        # Получаем контейнер
+        container = get_client().containers.get(name)
+        original_status = container.status
+        
+        # Сначала запускаем контейнер стандартным способом
+        if container.status != 'running':
+            container.start()
+            # Ждем немного, чтобы контейнер успел запуститься
+            import time
+            time.sleep(2)
+            # Обновляем статус
+            container.reload()
+        
+        # Проверяем команды только после успешного запуска контейнера
+        try:
+            from auth import get_bot_commands
+            commands = get_bot_commands(name)
+        except Exception as e:
+            # Если база данных недоступна - просто возвращаем успех запуска
+            return f"Контейнер запущен (статус: {original_status} → {container.status}). База команд недоступна: {str(e)}"
+        
+        # Если есть кастомная команда запуска, выполняем её
+        if commands and commands.start_command:
+            import subprocess
+            command = commands.start_command.replace('{{ container_name }}', name)
+            
+            # Проверяем что контейнер действительно запущен перед выполнением команды
+            if container.status != 'running':
+                return f"Контейнер не удалось запустить (статус: {container.status}), кастомная команда пропущена"
+            
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                # Не падаем, просто сообщаем об ошибке команды
+                return f"Контейнер запущен, но кастомная команда завершилась с ошибкой.\nКоманда: {command}\nОшибка: {result.stderr}\nВывод: {result.stdout}"
+            return f"Контейнер запущен. Выполнена команда: {command}\nВывод: {result.stdout}"
+        else:
+            return f"Контейнер запущен стандартным способом (статус: {original_status} → {container.status})"
+    except Exception as e:
+        raise RuntimeError(f"Ошибка запуска: {str(e)}")
 
 
 def stop_bot(name: str):
-    container = get_client().containers.get(name)
-    container.stop()
-    return True
+    """Остановить бот с использованием кастомной команды, если она задана"""
+    try:
+        from auth import get_bot_commands
+        commands = get_bot_commands(name)
+        container = get_client().containers.get(name)
+        
+        # Если есть кастомная команда остановки и контейнер запущен, выполняем её
+        if commands and commands.stop_command and container.status == 'running':
+            import subprocess
+            command = commands.stop_command.replace('{{ container_name }}', name)
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                # Если кастомная команда не сработала, всё равно останавливаем контейнер
+                container.stop()
+                return f"Кастомная команда завершилась с ошибкой, но контейнер остановлен принудительно.\nОшибка: {result.stderr}"
+            else:
+                # После выполнения кастомной команды останавливаем контейнер (если он всё ещё работает)
+                container.reload()
+                if container.status == 'running':
+                    container.stop()
+                return f"Выполнена команда: {command}\nВывод: {result.stdout}\nКонтейнер остановлен"
+        else:
+            # Стандартное поведение
+            if container.status == 'running':
+                container.stop()
+                return "Контейнер остановлен стандартным способом"
+            else:
+                return "Контейнер уже остановлен"
+    except Exception as e:
+        raise RuntimeError(f"Ошибка остановки: {str(e)}")
 
 
 def restart_bot(name: str):
-    container = get_client().containers.get(name)
-    container.restart()
-    return True
+    """Перезапустить бот с использованием кастомной команды, если она задана"""
+    try:
+        from auth import get_bot_commands
+        commands = get_bot_commands(name)
+        container = get_client().containers.get(name)
+        
+        if commands and commands.restart_command:
+            # Выполняем кастомную команду через subprocess
+            import subprocess
+            command = commands.restart_command.replace('{{ container_name }}', name)
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                # Если кастомная команда не сработала, перезапускаем стандартным способом
+                container.restart()
+                return f"Кастомная команда завершилась с ошибкой, выполнен стандартный перезапуск.\nОшибка: {result.stderr}"
+            return f"Выполнена команда: {command}\nВывод: {result.stdout}"
+        else:
+            # Стандартное поведение
+            container.restart()
+            return "Контейнер перезапущен стандартным способом"
+    except Exception as e:
+        raise RuntimeError(f"Ошибка перезапуска: {str(e)}")
 
 
 def remove_bot(name: str, force: bool = False):
@@ -280,7 +364,7 @@ def create_workspace(workspace_name: str, base_image: str = None, port_mappings:
 def list_workspaces() -> List[Dict]:
     """Получить список workspace'ов"""
     try:
-        containers = get_client().containers.list(all=True, filters={'label': ['bot-manager=1', 'workspace=1']})
+        containers = get_client().containers.list(all=True)
     except Exception as e:
         return [{'id': '-', 'name': 'ERROR', 'status': f'docker err: {e}', 'image': '-', 'created': '-'}]
     

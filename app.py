@@ -1,5 +1,5 @@
-from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, session
-from flask_socketio import SocketIO
+from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify, session, flash
+from flask_socketio import SocketIO, emit, emit
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import os
@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 import validators
 
 from config import cfg
-from auth import bp_auth, login_required, init_db, ensure_admin
+from auth import bp_auth, login_required, init_db, ensure_admin, get_bot_commands, save_bot_commands
 
 app = Flask(__name__)
 app.config.from_object('config.Config')
@@ -131,7 +131,7 @@ def require_login():
     
     # Список разрешенных путей без авторизации
     allowed_paths = [
-        '/login', '/static/', '/health'
+        '/login', '/static/', '/health', '/socket.io/'
     ]
     
     # Проверяем, нужна ли авторизация
@@ -149,11 +149,11 @@ def require_login():
             return jsonify({
                 'status': 'error', 
                 'error': 'Требуется авторизация',
-                'redirect': url_for('login')
+                'redirect': url_for('auth.login')
             }), 401
         else:
             # Для обычных запросов - редирект
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
 
 
 @app.route('/')
@@ -269,17 +269,31 @@ def create_workspace_page():
 @app.route('/bots/<name>/<action>', methods=['POST'])
 def bot_action(name, action):
     try:
+        result = None
+        command_info = None
+        
         if action == 'start':
-            start_bot(name)
+            result = start_bot(name)
         elif action == 'stop':
-            stop_bot(name)
+            result = stop_bot(name)
         elif action == 'restart':
-            restart_bot(name)
+            result = restart_bot(name)
         elif action == 'remove':
-            remove_bot(name, force=True)
+            result = remove_bot(name, force=True)
         else:
             return jsonify({'status': 'error', 'error': 'Unknown action'}), 400
-        return jsonify({'status': 'ok'})
+        
+        response = {'status': 'ok'}
+        
+        # Если result - это строка с информацией о команде, добавляем её в ответ
+        if isinstance(result, str) and 'Выполнена команда:' in result:
+            parts = result.split('\nВывод: ', 1)
+            command_part = parts[0].replace('Выполнена команда: ', '')
+            response['command'] = command_part
+            if len(parts) > 1:
+                response['output'] = parts[1]
+        
+        return jsonify(response)
     except Exception as e:
         return jsonify({'status': 'error', 'error': str(e)}), 400
 
@@ -312,6 +326,62 @@ def delete_workspace(name):
 @app.route('/terminal/<name>')
 def terminal_view(name):
     return render_template('terminal.html', container=name)
+
+
+@app.route('/bot/<name>/commands', methods=['GET', 'POST'])
+@login_required
+def bot_commands_config(name):
+    """Настройка команд для бота"""
+    if request.method == 'POST':
+        start_cmd = request.form.get('start_command', '').strip() or None
+        stop_cmd = request.form.get('stop_command', '').strip() or None 
+        restart_cmd = request.form.get('restart_command', '').strip() or None
+        
+        save_bot_commands(name, start_cmd, stop_cmd, restart_cmd)
+        flash(f'Команды для "{name}" успешно сохранены!', 'success')
+        return redirect(url_for('bot_commands_config', name=name))
+    
+    # Получаем текущие команды и статус контейнера
+    commands = get_bot_commands(name)
+    container_status = 'unknown'
+    
+    try:
+        from docker_api import get_client
+        container = get_client().containers.get(name)
+        container_status = container.status
+    except Exception:
+        pass
+    
+    return render_template('bot_commands.html', 
+                         container_name=name,
+                         container_status=container_status,
+                         commands=commands or type('obj', (object,), {'start_command': None, 'stop_command': None, 'restart_command': None})())
+
+
+@app.route('/api/bot/<name>/test-command', methods=['POST'])
+@login_required
+def test_bot_command(name):
+    """API для тестирования команд бота"""
+    data = request.get_json()
+    action = data.get('action')
+    command = data.get('command', '').strip()
+    
+    if not command:
+        return jsonify({'success': False, 'message': 'Команда не задана'})
+    
+    try:
+        # Для безопасности - просто валидируем команду, не выполняем
+        if len(command) > 1000:
+            return jsonify({'success': False, 'message': 'Команда слишком длинная'})
+        
+        # Проверяем, что команда содержит имя контейнера
+        if name not in command and '{{' not in command:
+            return jsonify({'success': False, 'message': f'Рекомендуется включить имя контейнера "{name}" в команду'})
+        
+        return jsonify({'success': True, 'message': f'✅ Команда {action} выглядит корректно'})
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Ошибка валидации: {str(e)}'})
 
 
 # Frontend override upload
@@ -347,13 +417,27 @@ def on_connect():
 
 @socketio.on('terminal_start')
 def on_terminal_start(data):
+    # Проверяем авторизацию для WebSocket
+    if 'user_id' not in session:
+        emit('terminal_output', {'data': 'Ошибка: требуется авторизация\n'})
+        return
+        
     container = data.get('container')
+    print(f"Terminal start requested for container: {container}")
+    emit('terminal_output', {'data': f'Подключение к {container}...\n'})
     start_terminal_session(request.sid, container)
 
 
 @socketio.on('terminal_input')
 def on_terminal_input(data):
-    handle_terminal_input(request.sid, data.get('data', ''))
+    # Проверяем авторизацию для WebSocket
+    if 'user_id' not in session:
+        emit('terminal_output', {'data': 'Ошибка: требуется авторизация\n'})
+        return
+        
+    command = data.get('data', '')
+    print(f"Terminal input: {repr(command)}")
+    handle_terminal_input(request.sid, command)
 
 
 @socketio.on('disconnect')

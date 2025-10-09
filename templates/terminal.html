@@ -93,6 +93,23 @@
     color: #6a6a6a;
 }
 
+.terminal-send-btn {
+    background: #28a745;
+    border: 1px solid #28a745;
+    color: white;
+    padding: 6px 12px;
+    margin-left: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.terminal-send-btn:hover {
+    background: #218838;
+    border-color: #218838;
+}
+
 /* Цветовая схема для вывода */
 .terminal-output .cmd-output {
     color: #e5e5e5;
@@ -189,7 +206,21 @@
     <div class="terminal-input-container">
         <span class="terminal-prompt" id="terminalPrompt">root@{{ container }}:~$</span>
         <input type="text" class="terminal-input" id="termInput" placeholder="Введите команду..." autocomplete="off">
+        <button type="button" class="btn btn-success btn-sm ms-2" id="sendBtn" onclick="sendCommand()" title="Отправить команду">
+            <i class="fas fa-paper-plane"></i> Отправить
+        </button>
     </div>
+</div>
+
+<div class="mt-3" id="historyPanel" style="background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:10px;max-height:200px;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="color:#4ec9b0;">История команд (сессия)</strong>
+        <div>
+            <button class="btn btn-sm btn-outline-light" onclick="requestHistory()" style="font-size:12px;">Обновить</button>
+            <button class="btn btn-sm btn-outline-warning" onclick="clearHistoryPanel()" style="font-size:12px;">Очистить</button>
+        </div>
+    </div>
+    <ul id="historyList" style="list-style:none;padding-left:0;margin:0;font-family:'Cascadia Code','JetBrains Mono',monospace;font-size:12px;color:#ddd;"></ul>
 </div>
 
 <script src="/static/js/terminal.js"></script>
@@ -228,6 +259,74 @@ document.addEventListener('keydown', function(e) {
 
 // Инициализация терминала
 initTerminal('{{ container }}');
+
+// Расширяем initTerminal для поддержки истории
+(function augmentTerminal(){
+    if (!window._terminalAugmented) {
+        window._terminalAugmented = true;
+        const oldInit = window.initTerminal;
+        window.initTerminal = function(containerName){
+            oldInit(containerName);
+            const socket = io(); // отдельное подключение для истории (упростим)
+
+            const historyList = document.getElementById('historyList');
+
+            function addHistoryItem(item){
+                const li = document.createElement('li');
+                li.dataset.id = item.id;
+                let statusColor = '#888';
+                if (item.exit_code === 0) statusColor = '#4ec9b0';
+                else if (item.exit_code != null) statusColor = '#f44747';
+                li.innerHTML = `<span style=\"color:${statusColor}\">[${item.id}]</span> <code style=\"color:#fff\">${item.command}</code>` +
+                  (item.exit_code != null ? ` <span style=\"color:${statusColor};\">(exit ${item.exit_code}, ${item.duration_ms}ms)</span>` : ' <span style=\"color:#aaa;\">(running...)</span>') +
+                  ` <button class=\"btn btn-xs btn-outline-info\" style=\"padding:1px 4px;font-size:10px;\" onclick=\"repeatCommand('${item.command.replace(/'/g,"&#39;")}')\">↻</button>`;
+                historyList.prepend(li);
+            }
+
+            window.repeatCommand = function(cmd){
+                const input = document.getElementById('termInput');
+                input.value = cmd;
+                input.focus();
+            }
+
+            window.clearHistoryPanel = function(){
+                historyList.innerHTML='';
+            }
+
+            window.requestHistory = function(){
+                // Локально просто выводим специальную команду
+                const input = document.getElementById('termInput');
+                input.value=':history';
+                sendCommand();
+            }
+
+            // Основное соединение уже слушает terminal_output. Добавим глобальных слушателей (реиспользуем первый socket io())
+            const mainSockets = document.getElementsByTagName('script');
+            // Подключаемся к существующему глобальному io() через window.socket если нужно.
+            const globalSocket = window.socket || io();
+
+            globalSocket.on('terminal_command_started', (data)=>{
+                addHistoryItem({id:data.id, command:data.command});
+            });
+
+            globalSocket.on('terminal_command_result', (data)=>{
+                // Найти элемент и обновить
+                const li = historyList.querySelector(`li[data-id="${data.id}"]`);
+                if (li){
+                    let statusColor = data.exit_code === 0 ? '#4ec9b0' : '#f44747';
+                    li.innerHTML = `<span style=\"color:${statusColor}\">[${data.id}]</span> <code style=\"color:#fff\">${data.command}</code>` +
+                      ` <span style=\"color:${statusColor};\">(exit ${data.exit_code}, ${data.duration_ms}ms)</span>` +
+                      ` <button class=\"btn btn-xs btn-outline-info\" style=\"padding:1px 4px;font-size:10px;\" onclick=\"repeatCommand('${data.command.replace(/'/g,"&#39;")}')\">↻</button>`;
+                }
+            });
+
+            globalSocket.on('terminal_history_full', (payload)=>{
+                historyList.innerHTML='';
+                (payload.history||[]).forEach(addHistoryItem);
+            });
+        }
+    }
+})();
 </script>
 
 {% endblock %}

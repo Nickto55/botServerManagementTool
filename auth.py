@@ -4,13 +4,52 @@ import logging
 import bcrypt
 from functools import wraps
 from flask import Blueprint, request, session, redirect, url_for, render_template, flash
-from sqlalchemy import Column, Integer, String, create_engine, select
+from sqlalchemy import Column, Integer, String, create_engine, select, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 from config import cfg
 
 engine = create_engine(cfg.SQLALCHEMY_DATABASE_URI, echo=False, future=True)
 Base = declarative_base()
 SessionLocal = scoped_session(sessionmaker(bind=engine, autoflush=False, autocommit=False))
+
+class BotCommands(Base):
+    __tablename__ = 'bot_commands'
+    id = Column(Integer, primary_key=True)
+    container_name = Column(String(255), unique=True, nullable=False)
+    start_command = Column(Text, nullable=True)
+    stop_command = Column(Text, nullable=True)
+    restart_command = Column(Text, nullable=True)
+    
+    @staticmethod
+    def get_or_create(container_name: str):
+        """Получить или создать команды для контейнера"""
+        db = SessionLocal()
+        try:
+            stmt = select(BotCommands).where(BotCommands.container_name == container_name)
+            commands = db.execute(stmt).scalar_one_or_none()
+            if not commands:
+                commands = BotCommands(container_name=container_name)
+                db.add(commands)
+                db.commit()
+                db.refresh(commands)
+            return commands
+        finally:
+            db.close()
+    
+    def update_commands(self, start_cmd=None, stop_cmd=None, restart_cmd=None):
+        """Обновить команды"""
+        db = SessionLocal()
+        try:
+            if start_cmd is not None:
+                self.start_command = start_cmd
+            if stop_cmd is not None:
+                self.stop_command = stop_cmd
+            if restart_cmd is not None:
+                self.restart_command = restart_cmd
+            db.merge(self)
+            db.commit()
+        finally:
+            db.close()
 
 class User(Base):
     __tablename__ = 'users'
@@ -175,3 +214,20 @@ def ensure_admin():
     admin_pass = os.getenv('ADMIN_PASS', 'admin')
     if not get_user_by_username(admin_user):
         User.create(admin_user, admin_pass)
+
+
+def get_bot_commands(container_name: str):
+    """Получить команды для контейнера"""
+    db = SessionLocal()
+    try:
+        stmt = select(BotCommands).where(BotCommands.container_name == container_name)
+        return db.execute(stmt).scalar_one_or_none()
+    finally:
+        db.close()
+
+
+def save_bot_commands(container_name: str, start_cmd: str = None, stop_cmd: str = None, restart_cmd: str = None):
+    """Сохранить команды для контейнера"""
+    commands = BotCommands.get_or_create(container_name)
+    commands.update_commands(start_cmd, stop_cmd, restart_cmd)
+    return commands

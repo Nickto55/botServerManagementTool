@@ -1,64 +1,183 @@
+import subprocess
 import threading
-import docker
-import json
-from typing import Dict
-from flask_socketio import emit, join_room, leave_room
-from docker.models.containers import Container
-from docker.utils.socket import frames_iter
-from docker import errors as docker_errors
-
-from docker_api import get_client
+import time
+from datetime import datetime
+from typing import Dict, List
+from flask_socketio import emit
 
 TERMINAL_SESSIONS: Dict[str, dict] = {}
 
+# Максимум команд в истории (per session)
+MAX_HISTORY = 200
 
-def open_exec_socket(container: Container, cmd: str = '/bin/bash'):
-    cli = get_client()
-    exec_id = cli.api.exec_create(container.id, cmd, tty=True, stdin=True)
-    sock = cli.api.exec_start(exec_id, tty=True, socket=True)
-    return exec_id, sock
+
+def _now_iso():
+    return datetime.utcnow().isoformat() + 'Z'
 
 
 def start_terminal_session(sid: str, container_name: str):
+    """Инициализация сессии терминала с хранением истории команд."""
     try:
-        container = get_client().containers.get(container_name)
-    except docker_errors.NotFound:
-        emit('terminal_output', {'data': f'Контейнер {container_name} не найден\n'}, room=sid)
+        print(f"[terminal] start session sid={sid} container={container_name}")
+
+        TERMINAL_SESSIONS[sid] = {
+            'container': container_name,
+            'active': True,
+            'history': [],  # List[dict]
+            'lock': threading.Lock()
+        }
+
+        emit('terminal_output', {'data': f'=== Подключение к {container_name} ===\n'})
+        emit('terminal_output', {'data': 'Введите команду и нажмите Enter. Команда :history покажет список команд. :clear очистит экран.\n'})
+        emit('terminal_output', {'data': f'root@{container_name}:~$ '})
+        emit('terminal_history_full', {'history': []})
+
+    except Exception as e:
+        print(f"[terminal] start error: {e}")
+        emit('terminal_output', {'data': f'Ошибка запуска терминала: {e}\n'})
+
+
+def _append_history(sid: str, entry: dict):
+    sess = TERMINAL_SESSIONS.get(sid)
+    if not sess:
         return
+    with sess['lock']:
+        sess['history'].append(entry)
+        # Обрезаем при превышении
+        if len(sess['history']) > MAX_HISTORY:
+            sess['history'] = sess['history'][-MAX_HISTORY:]
 
-    exec_id, sock = open_exec_socket(container)
-    TERMINAL_SESSIONS[sid] = {'exec_id': exec_id, 'socket': sock, 'container': container}
 
-    def reader():
-        try:
-            for frame in frames_iter(sock._sock):  # noqa
-                if sid not in TERMINAL_SESSIONS:
-                    break
-                if frame:
-                    emit('terminal_output', {'data': frame.decode(errors='ignore')}, room=sid)
-        finally:
-            sock.close()
-            TERMINAL_SESSIONS.pop(sid, None)
-
-    t = threading.Thread(target=reader, daemon=True)
-    t.start()
+def _update_history_last(sid: str, **updates):
+    sess = TERMINAL_SESSIONS.get(sid)
+    if not sess:
+        return
+    with sess['lock']:
+        if not sess['history']:
+            return
+        sess['history'][-1].update(**updates)
+        return sess['history'][-1]
 
 
 def handle_terminal_input(sid: str, data: str):
-    sess = TERMINAL_SESSIONS.get(sid)
-    if not sess:
-        emit('terminal_output', {'data': 'Сессия не найдена\n'}, room=sid)
-        return
+    """Обработка ввода пользователя с сохранением истории команд."""
     try:
-        sess['socket'].send(data.encode())
+        sess = TERMINAL_SESSIONS.get(sid)
+        if not sess:
+            emit('terminal_output', {'data': 'Сессия не найдена. Обновите страницу.\n'})
+            return
+
+        container_name = sess['container']
+        raw = data if isinstance(data, str) else (data.get('data') if isinstance(data, dict) else '')
+        command = (raw or '').strip()
+
+        if not command:
+            emit('terminal_output', {'data': f'root@{container_name}:~$ '})
+            return
+
+        # Специальные локальные команды
+        if command == ':history':
+            hist_copy: List[dict] = []
+            with sess['lock']:
+                for h in sess['history']:
+                    hist_copy.append({k: h.get(k) for k in ['id','command','exit_code','started_at','finished_at']})
+            emit('terminal_output', {'data': '\nИстория команд (последние):\n'})
+            for h in hist_copy:
+                emit('terminal_output', {'data': f"[{h['id']}] {h['command']} (exit={h.get('exit_code')})\n"})
+            emit('terminal_output', {'data': f'\nroot@{container_name}:~$ '})
+            return
+        if command == ':clear':
+            emit('terminal_clear', {})
+            emit('terminal_output', {'data': f'root@{container_name}:~$ '})
+            return
+
+        cmd_id = int(time.time() * 1000)  # простой уникальный id
+        entry = {
+            'id': cmd_id,
+            'command': command,
+            'stdout': '',
+            'stderr': '',
+            'exit_code': None,
+            'started_at': _now_iso(),
+            'finished_at': None,
+            'duration_ms': None
+        }
+        _append_history(sid, entry)
+
+        # Сразу отправляем событие о новой команде
+        emit('terminal_command_started', {'id': cmd_id, 'command': command, 'started_at': entry['started_at']})
+        # Отображаем в основном выводе
+        emit('terminal_output', {'data': f"{command}\n"})
+
+        def run_command():
+            started = time.time()
+            try:
+                result = subprocess.run(
+                    ['docker', 'exec', container_name, 'bash', '-lc', command],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                stdout = result.stdout or ''
+                stderr = result.stderr or ''
+                exit_code = result.returncode
+            except subprocess.TimeoutExpired:
+                stdout = ''
+                stderr = 'Timeout (30s)\n'
+                exit_code = 124
+            except Exception as e:
+                stdout = ''
+                stderr = f'Ошибка выполнения: {e}\n'
+                exit_code = 1
+
+            finished = time.time()
+            updated = _update_history_last(
+                sid,
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=exit_code,
+                finished_at=_now_iso(),
+                duration_ms=int((finished - started) * 1000)
+            )
+
+            # Отправляем структурированный результат
+            emit('terminal_command_result', {
+                'id': updated['id'],
+                'command': updated['command'],
+                'stdout': stdout,
+                'stderr': stderr,
+                'exit_code': exit_code,
+                'started_at': updated['started_at'],
+                'finished_at': updated['finished_at'],
+                'duration_ms': updated['duration_ms']
+            })
+
+            # Также выводим в обычный поток
+            if stdout:
+                emit('terminal_output', {'data': stdout})
+            if stderr:
+                emit('terminal_output', {'data': f'! {stderr}'})
+            emit('terminal_output', {'data': f'root@{container_name}:~$ '})
+
+        # Запускаем в отдельном потоке чтобы не блокировать SocketIO
+        threading.Thread(target=run_command, daemon=True).start()
+
     except Exception as e:
-        emit('terminal_output', {'data': f'Ошибка отправки: {e}\n'}, room=sid)
+        print(f"[terminal] input error: {e}")
+        emit('terminal_output', {'data': f'Ошибка обработки команды: {e}\n'})
+        emit('terminal_output', {'data': f'root@{container_name}:~$ '})
 
 
 def close_session(sid: str):
     sess = TERMINAL_SESSIONS.pop(sid, None)
     if sess:
-        try:
-            sess['socket'].close()
-        except Exception:
-            pass
+        print(f"[terminal] close session sid={sid} container={sess.get('container')}")
+
+
+def get_session_history_for_container(container_name: str):
+    """Вернуть историю для первого активного sid указанного контейнера."""
+    for sid, sess in TERMINAL_SESSIONS.items():
+        if sess.get('container') == container_name:
+            with sess['lock']:
+                return sess['history'][:]
+    return []

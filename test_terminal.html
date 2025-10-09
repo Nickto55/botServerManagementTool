@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Тест терминала</title>
+    <style>
+        .terminal-container {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Courier New', monospace;
+            height: 400px;
+            width: 800px;
+            border: 1px solid #333;
+            margin: 20px;
+        }
+        
+        .terminal-header {
+            background: #2d2d30;
+            padding: 8px 12px;
+            border-bottom: 1px solid #3e3e42;
+            font-size: 12px;
+        }
+        
+        .terminal-body {
+            height: calc(100% - 50px);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #terminal {
+            flex: 1;
+            padding: 8px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .terminal-input-container {
+            padding: 8px;
+            border-top: 1px solid #3e3e42;
+            display: flex;
+            align-items: center;
+        }
+        
+        .terminal-prompt {
+            color: #569cd6;
+            margin-right: 8px;
+        }
+        
+        #termInput {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #d4d4d4;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            outline: none;
+        }
+        
+        .cmd-success { color: #4ec9b0; }
+        .cmd-error { color: #f44747; }
+        .cmd-warning { color: #ffcc02; }
+        .cmd-info { color: #569cd6; }
+        .cmd-prompt { color: #569cd6; }
+        .cmd-output { color: #d4d4d4; }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <h1>Тест терминала</h1>
+    <div class="terminal-container">
+        <div class="terminal-header">
+            Terminal: test-bot
+        </div>
+        <div class="terminal-body">
+            <div id="terminal"></div>
+            <div class="terminal-input-container">
+                <span class="terminal-prompt">root@test-bot:~$</span>
+                <input type="text" id="termInput" placeholder="Введите команду..." autofocus>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        console.log('Loading test terminal page...');
+        
+        function appendOutput(text, className = 'cmd-output') {
+            const termEl = document.getElementById('terminal');
+            const span = document.createElement('span');
+            span.className = className;
+            span.textContent = text;
+            termEl.appendChild(span);
+            termEl.scrollTop = termEl.scrollHeight;
+        }
+
+        // Инициализация терминала
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing terminal...');
+            
+            const inputEl = document.getElementById('termInput');
+            const socket = io();
+            
+            console.log('Creating socket connection...');
+            
+            socket.on('connect', function() {
+                console.log('Socket connected successfully, ID:', socket.id);
+                appendOutput('=== Подключение к test-bot ===\n', 'cmd-success');
+                socket.emit('terminal_start', {container_id: 'test-bot'});
+            });
+            
+            socket.on('terminal_output', function(data) {
+                console.logs('Received terminal output:', data);
+                if (data && data.data) {
+                    appendOutput(data.data);
+                }
+            });
+            
+            socket.on('connect_error', function(error) {
+                console.error('Connection error:', error);
+                appendOutput('Ошибка подключения: ' + error + '\n', 'cmd-error');
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('Socket disconnected');
+                appendOutput('\n[Соединение разорвано]\n', 'cmd-error');
+            });
+            
+            inputEl.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const command = inputEl.value.trim();
+                    if (command) {
+                        console.log('Sending command:', command);
+                        appendOutput('root@test-bot:~$ ' + command + '\n', 'cmd-prompt');
+                        socket.emit('terminal_input', command);
+                        inputEl.value = '';
+                    }
+                }
+            });
+            
+            // Тест без сокета
+            appendOutput('Тестовая страница загружена\n', 'cmd-info');
+            appendOutput('Пытаемся подключиться к серверу...\n', 'cmd-info');
+        });
+    </script>
+</body>
+</html>

@@ -13,10 +13,14 @@
     <div class="container-fluid">
         <a class="navbar-brand" href="/">BotManager</a>
         <div class="d-flex">
-            <a href="/workspace/create" class="btn btn-outline-success btn-sm me-2">Создать Workspace</a>
-            <a href="/upload/frontend" class="btn btn-outline-light btn-sm me-2">Заменить фронтенд</a>
-            <a href="/profile" class="btn btn-outline-info btn-sm me-2">Профиль</a>
-            <a href="/logout" class="btn btn-outline-warning btn-sm">Выход</a>
+            {% if session.user_id %}
+                <a href="/workspace/create" class="btn btn-outline-success btn-sm me-2">Создать Workspace</a>
+                <a href="/upload/frontend" class="btn btn-outline-light btn-sm me-2">Заменить фронтенд</a>
+                <a href="/profile" class="btn btn-outline-info btn-sm me-2">Профиль</a>
+                <a href="/logout" class="btn btn-outline-warning btn-sm">Выход</a>
+            {% else %}
+                <a href="/login" class="btn btn-outline-primary btn-sm">Войти</a>
+            {% endif %}
         </div>
     </div>
 </nav>

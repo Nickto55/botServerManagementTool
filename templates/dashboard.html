@@ -53,12 +53,17 @@
                 {% endif %}
               </div>
               <div class="card-footer">
-                <div class="btn-group w-100" role="group">
+                <div class="btn-group w-100 mb-2" role="group">
                   {% if ws.status == 'running' %}
                     <a href="/terminal/{{ ws.name }}" class="btn btn-outline-primary btn-sm">
                       <i class="fas fa-terminal"></i> Терминал
                     </a>
                   {% endif %}
+                  <a href="/bot/{{ ws.name }}/commands" class="btn btn-outline-secondary btn-sm" title="Настроить команды">
+                    <i class="fas fa-cog"></i> Команды
+                  </a>
+                </div>
+                <div class="btn-group w-100" role="group">
                   <button class="btn btn-outline-success btn-sm act" data-name="{{ ws.name }}" data-act="start" title="Запустить">▶</button>
                   <button class="btn btn-outline-warning btn-sm act" data-name="{{ ws.name }}" data-act="stop" title="Остановить">■</button>
                   <button class="btn btn-outline-info btn-sm act" data-name="{{ ws.name }}" data-act="restart" title="Перезапустить">↻</button>
@@ -134,6 +139,7 @@
                   <button class="btn btn-sm btn-outline-success act" data-name="{{b.name}}" data-act="start">▶</button>
                   <button class="btn btn-sm btn-outline-warning act" data-name="{{b.name}}" data-act="stop">■</button>
                   <button class="btn btn-sm btn-outline-info act" data-name="{{b.name}}" data-act="restart">↻</button>
+                  <a href="/bot/{{b.name}}/commands" class="btn btn-sm btn-outline-secondary" title="Настроить команды">⚙️</a>
                   <button class="btn btn-sm btn-outline-danger act" data-name="{{b.name}}" data-act="remove">✖</button>
                 </div>
               </td>
@@ -267,6 +273,17 @@ document.querySelectorAll('.act').forEach(btn=>{
     
     if(act==='remove' && !confirm(`Удалить контейнер "${name}"?\n\nВнимание: Данные workspace сохранятся в папке bots/`)) return;
     
+    const actionNames = {
+      'start': 'Запуск',
+      'stop': 'Остановка', 
+      'restart': 'Перезагрузка',
+      'remove': 'Удаление'
+    };
+    
+    // Показываем уведомление о выполняемом действии
+    const actionName = actionNames[act] || act;
+    showCommandNotification(`🔄 ${actionName} "${name}"...`, 'info');
+    
     const originalText = btn.innerHTML;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
     btn.disabled = true;
@@ -276,18 +293,72 @@ document.querySelectorAll('.act').forEach(btn=>{
       const data = await res.json();
       
       if(data.status==='ok') { 
-        location.reload(); 
+        // Показываем успешное выполнение с командой, если есть
+        let message = `✅ ${actionName} "${name}" выполнен`;
+        if(data.command) {
+          message += `\n\n💻 Выполнена команда:\n${data.command}`;
+        }
+        if(data.output) {
+          message += `\n\n📄 Вывод:\n${data.output}`;
+        }
+        showCommandNotification(message, 'success');
+        setTimeout(() => location.reload(), 1500);
       } else { 
-        alert('Ошибка: ' + data.error); 
+        showCommandNotification(`❌ Ошибка ${actionName.toLowerCase()}: ${data.error}`, 'danger');
       }
     } catch(err) {
-      alert('Ошибка сети: ' + err.message);
+      showCommandNotification(`🔴 Ошибка сети: ${err.message}`, 'danger');
     } finally {
       btn.innerHTML = originalText;
       btn.disabled = false;
     }
   });
 });
+
+// Функция для показа уведомлений о командах
+function showCommandNotification(message, type = 'info') {
+  // Создаем контейнер для уведомлений, если его нет
+  let container = document.getElementById('command-notifications');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'command-notifications';
+    container.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 9999;
+      max-width: 400px;
+    `;
+    document.body.appendChild(container);
+  }
+  
+  // Создаем уведомление
+  const notification = document.createElement('div');
+  notification.className = `alert alert-${type} alert-dismissible fade show`;
+  notification.style.cssText = `
+    margin-bottom: 10px;
+    white-space: pre-line;
+    font-family: monospace;
+    font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  `;
+  
+  notification.innerHTML = `
+    ${message}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  `;
+  
+  container.appendChild(notification);
+  
+  // Автоматически скрываем через 5 секунд (кроме ошибок)
+  if (type !== 'danger') {
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.remove();
+      }
+    }, 5000);
+  }
+}
 
 // Сохранение активной вкладки
 document.addEventListener('DOMContentLoaded', function() {
