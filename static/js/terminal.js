@@ -4,7 +4,13 @@ function initTerminal(containerName) {
     const promptEl = document.getElementById('terminalPrompt');
     // Один глобальный socket для страницы
     if (!window.socket) {
-        window.socket = io();
+        console.log('[terminal] creating new socket connection...');
+        window.socket = io({transports:['websocket','polling']});
+        window.socket.on('connect', ()=>console.log('[terminal] socket connected id=', window.socket.id));
+        window.socket.on('disconnect', ()=>console.log('[terminal] socket disconnected'));
+        window.socket.on('connect_error', (err)=>console.error('[terminal] socket connect_error', err));
+    } else {
+        console.log('[terminal] reusing existing socket id=', window.socket.id);
     }
     const socket = window.socket;
     
@@ -70,6 +76,10 @@ function initTerminal(containerName) {
     
     // Обработка ввода команд
     inputEl.addEventListener('keydown', (e) => {
+        // Debug лог
+        if (e.key === 'Enter') {
+            console.log('[terminal] keydown Enter detected, input value=', inputEl.value);
+        }
         switch(e.key) {
             case 'Enter':
                 e.preventDefault();
@@ -87,8 +97,12 @@ function initTerminal(containerName) {
                     appendOutput(`${currentUser}@${containerName}:${currentPath}$ ${command}\n`, 'cmd-prompt');
                     
                     // Отправляем команду
-                    console.log('Sending command:', command);
-                    socket.emit('terminal_input', {data: command});
+                    console.log('[terminal] emitting command via Enter:', command, ' socket connected=', socket.connected);
+                    if (socket.connected) {
+                        socket.emit('terminal_input', {data: command});
+                    } else {
+                        console.warn('[terminal] socket not connected, cannot send');
+                    }
                 }
                 
                 inputEl.value = '';

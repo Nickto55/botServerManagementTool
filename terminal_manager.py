@@ -4,6 +4,8 @@ import time
 from datetime import datetime
 from typing import Dict, List
 from flask_socketio import emit
+import docker
+from docker.errors import DockerException, NotFound as DockerNotFound
 
 TERMINAL_SESSIONS: Dict[str, dict] = {}
 
@@ -24,11 +26,54 @@ def start_terminal_session(sid: str, container_name: str):
             'container': container_name,
             'active': True,
             'history': [],  # List[dict]
-            'lock': threading.Lock()
+            'lock': threading.Lock(),
+            'docker_ok': False,
+            'container_status': 'unknown'
         }
 
         emit('terminal_output', {'data': f'=== Подключение к {container_name} ===\n'})
-        emit('terminal_output', {'data': 'Введите команду и нажмите Enter. Команда :history покажет список команд. :clear очистит экран.\n'})
+        emit('terminal_output', {'data': 'Проверка Docker окружения...\n'})
+
+        # Проверка Docker
+        docker_status = {
+            'docker': 'down',
+            'container': 'absent',
+            'container_running': False,
+            'image': None
+        }
+        try:
+            cli = docker.from_env()
+            cli.ping()
+            docker_status['docker'] = 'up'
+            try:
+                container = cli.containers.get(container_name)
+                docker_status['container'] = 'present'
+                docker_status['container_running'] = container.status == 'running'
+                docker_status['image'] = container.image.tags[0] if container.image.tags else container.image.short_id
+                TERMINAL_SESSIONS[sid]['container_status'] = container.status
+            except DockerNotFound:
+                docker_status['container'] = 'missing'
+        except DockerException as de:
+            docker_status['error'] = str(de)
+
+        if docker_status['docker'] == 'up':
+            emit('terminal_output', {'data': 'Docker: OK\n'})
+            TERMINAL_SESSIONS[sid]['docker_ok'] = True
+        else:
+            emit('terminal_output', {'data': 'Docker: НЕ ДОСТУПЕН\n'})
+
+        if docker_status['container'] == 'present':
+            if docker_status['container_running']:
+                emit('terminal_output', {'data': f'Контейнер: запущен (image={docker_status["image"]})\n'})
+            else:
+                emit('terminal_output', {'data': 'Контейнер: найден, но НЕ запущен. Используйте :start для запуска.\n'})
+        elif docker_status['container'] == 'missing':
+            emit('terminal_output', {'data': 'Контейнер: не найден\n'})
+        else:
+            emit('terminal_output', {'data': 'Контейнер: неизвестно\n'})
+
+        emit('terminal_status', docker_status)
+        emit('terminal_output', {'data': 'Доступные спецкоманды: :history, :clear, :start (запустить контейнер если остановлен)\n'})
         emit('terminal_output', {'data': f'root@{container_name}:~$ '})
         emit('terminal_history_full', {'history': []})
 
@@ -88,6 +133,27 @@ def handle_terminal_input(sid: str, data: str):
             return
         if command == ':clear':
             emit('terminal_clear', {})
+            emit('terminal_output', {'data': f'root@{container_name}:~$ '})
+            return
+        if command == ':start':
+            # Попытка запуска контейнера если он существует и не запущен
+            try:
+                cli = docker.from_env()
+                container = cli.containers.get(container_name)
+                if container.status != 'running':
+                    container.start()
+                    emit('terminal_output', {'data': 'Контейнер запускается...\n'})
+                    time.sleep(1)
+                    container.reload()
+                    emit('terminal_output', {'data': f'Статус: {container.status}\n'})
+                else:
+                    emit('terminal_output', {'data': 'Контейнер уже запущен\n'})
+            except DockerNotFound:
+                emit('terminal_output', {'data': 'Невозможно запустить: контейнер не найден\n'})
+            except DockerException as de:
+                emit('terminal_output', {'data': f'Ошибка Docker: {de}\n'})
+            except Exception as e:
+                emit('terminal_output', {'data': f'Ошибка запуска: {e}\n'})
             emit('terminal_output', {'data': f'root@{container_name}:~$ '})
             return
 

@@ -212,6 +212,12 @@
     </div>
 </div>
 
+<div id="terminalStatus" style="margin-top:8px;font-family:'Cascadia Code','JetBrains Mono',monospace;font-size:12px;background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:8px;color:#ddd;">
+  <strong style="color:#4ec9b0;">Статус Docker:</strong>
+  <div id="dockerStatusLine">Ожидание...</div>
+  <div id="containerStatusLine"></div>
+</div>
+
 <div class="mt-3" id="historyPanel" style="background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:10px;max-height:200px;overflow:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <strong style="color:#4ec9b0;">История команд (сессия)</strong>
@@ -223,6 +229,7 @@
     <ul id="historyList" style="list-style:none;padding-left:0;margin:0;font-family:'Cascadia Code','JetBrains Mono',monospace;font-size:12px;color:#ddd;"></ul>
 </div>
 
+<script src="/socket.io/socket.io.js"></script>
 <script src="/static/js/terminal.js"></script>
 <script>
 let isFullscreen = false;
@@ -267,7 +274,8 @@ initTerminal('{{ container }}');
         const oldInit = window.initTerminal;
         window.initTerminal = function(containerName){
             oldInit(containerName);
-            const socket = io(); // отдельное подключение для истории (упростим)
+            // Используем один глобальный socket, созданный в initTerminal
+            const socket = window.socket;
 
             const historyList = document.getElementById('historyList');
 
@@ -303,7 +311,7 @@ initTerminal('{{ container }}');
             // Основное соединение уже слушает terminal_output. Добавим глобальных слушателей (реиспользуем первый socket io())
             const mainSockets = document.getElementsByTagName('script');
             // Подключаемся к существующему глобальному io() через window.socket если нужно.
-            const globalSocket = window.socket || io();
+            const globalSocket = socket;
 
             globalSocket.on('terminal_command_started', (data)=>{
                 addHistoryItem({id:data.id, command:data.command});
@@ -323,6 +331,23 @@ initTerminal('{{ container }}');
             globalSocket.on('terminal_history_full', (payload)=>{
                 historyList.innerHTML='';
                 (payload.history||[]).forEach(addHistoryItem);
+            });
+
+            globalSocket.on('terminal_status', (data)=>{
+                const dockerLine = document.getElementById('dockerStatusLine');
+                const containerLine = document.getElementById('containerStatusLine');
+                if (!data) return;
+                dockerLine.textContent = `Docker: ${data.docker}` + (data.error?` (error: ${data.error})`:'' );
+                if (data.container === 'present') {
+                    containerLine.textContent = `Container: ${data.container_running ? 'running' : 'stopped'}${data.image? ' image=' + data.image: ''}`;
+                    containerLine.style.color = data.container_running ? '#4ec9b0' : '#ffab70';
+                } else if (data.container === 'missing') {
+                    containerLine.textContent = 'Container: missing';
+                    containerLine.style.color = '#f44747';
+                } else {
+                    containerLine.textContent = 'Container: unknown';
+                    containerLine.style.color = '#aaa';
+                }
             });
         }
     }
