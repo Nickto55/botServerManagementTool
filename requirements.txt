@@ -11,3 +11,4 @@ gunicorn==23.0.0
 flask-limiter==3.8.0
 psutil==6.1.0
 validators==0.34.0
+paramiko==3.5.0

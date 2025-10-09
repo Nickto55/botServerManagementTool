@@ -6,6 +6,7 @@ from typing import Dict, List
 from flask_socketio import emit
 import docker
 from docker.errors import DockerException, NotFound as DockerNotFound
+from exec_backend import get_backend
 
 TERMINAL_SESSIONS: Dict[str, dict] = {}
 
@@ -178,19 +179,13 @@ def handle_terminal_input(sid: str, data: str):
         def run_command():
             started = time.time()
             try:
-                result = subprocess.run(
-                    ['docker', 'exec', container_name, 'bash', '-lc', command],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                stdout = result.stdout or ''
-                stderr = result.stderr or ''
-                exit_code = result.returncode
-            except subprocess.TimeoutExpired:
-                stdout = ''
-                stderr = 'Timeout (30s)\n'
-                exit_code = 124
+                backend = get_backend()
+                # Если команда не начинается с docker, явно оборачиваем для exec в контейнере
+                if command.startswith('docker '):
+                    exec_cmd = command
+                else:
+                    exec_cmd = f"docker exec {container_name} bash -lc {command!r}"
+                stdout, stderr, exit_code = backend.run(exec_cmd, timeout=30)
             except Exception as e:
                 stdout = ''
                 stderr = f'Ошибка выполнения: {e}\n'
