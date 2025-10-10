@@ -291,8 +291,15 @@ function initServerConsole() {
 
     socket.on('server_console_output', function(data) {
         console.log('[server_console] Output received:', data);
-        terminal.innerHTML += data.data;
-        terminal.scrollTop = terminal.scrollHeight;
+        console.log('[server_console] Data content:', data.data);
+        console.log('[server_console] Terminal element:', terminal);
+        if (terminal && data && data.data) {
+            terminal.innerHTML += data.data;
+            terminal.scrollTop = terminal.scrollHeight;
+            console.log('[server_console] Terminal updated, new content length:', terminal.innerHTML.length);
+        } else {
+            console.error('[server_console] ERROR: Missing terminal or data!', {terminal: terminal, data: data});
+        }
     });
 
     socket.on('server_console_command_started', function(data) {
