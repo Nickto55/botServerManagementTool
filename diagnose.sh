@@ -147,13 +147,50 @@ else
     echo "✗ Невозможно протестировать импорты - нет виртуального окружения"
 fi
 
-echo -e "\n10. Проверка прав доступа..."
-ls -la "$APP_DIR"
-echo "Владелец директории:"
-stat -c '%U:%G' "$APP_DIR"
+echo -e "\n10. Проверка команд запуска контейнеров..."
+if [ -f "$APP_DIR/venv/bin/python" ]; then
+    $APP_DIR/venv/bin/python -c "
+import subprocess
+import sys
+sys.path.insert(0, '$APP_DIR')
 
-echo -e "\n=== Конец диагностики ==="
-echo "Для ручного запуска: cd $APP_DIR && ./venv/bin/python app.py"
+try:
+    from auth import get_bot_commands
+    from docker_api import list_bots
+    
+    # Получаем список всех контейнеров
+    containers = list_bots()
+    problematic_containers = []
+    
+    for container in containers:
+        if container['name'] == 'ERROR':
+            continue
+            
+        name = container['name']
+        commands = get_bot_commands(name)
+        
+        if commands and commands.launch_command:
+            launch_cmd = commands.launch_command
+            if 'docker run' in launch_cmd:
+                problematic_containers.append(f'{name}: использует docker run вместо docker start')
+    
+    if problematic_containers:
+        print('✗ Найдены проблемные команды запуска:')
+        for problem in problematic_containers:
+            print(f'  - {problem}')
+        print('')
+        print('Исправление:')
+        print('  bash fix_container_launch.sh <container_name>')
+        print('  Или сбросьте команды через веб-интерфейс')
+    else:
+        print('✓ Команды запуска контейнеров в порядке')
+        
+except Exception as e:
+    print(f'✗ Ошибка проверки команд: {e}')
+"
+else
+    echo "✗ Невозможно проверить команды - нет виртуального окружения"
+fi
 echo ""
 echo "Для исправления SSH ключей выполните:"
 echo "  sudo -u botops ssh-keygen -t rsa -b 2048 -N '' -f /home/botops/.ssh/id_rsa -q"

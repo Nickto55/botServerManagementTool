@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 import validators
 
 from config import cfg
-from auth import bp_auth, login_required, init_db, ensure_admin, get_bot_commands, save_bot_commands
+from auth import bp_auth, login_required, init_db, ensure_admin, get_bot_commands, save_bot_commands, BotCommands
 
 app = Flask(__name__)
 app.config.from_object('config.Config')
@@ -362,30 +362,18 @@ def bot_commands_config(name):
                          commands=commands or type('obj', (object,), {'launch_command': None, 'start_command': None, 'stop_command': None, 'restart_command': None})())
 
 
-@app.route('/api/bot/<name>/test-command', methods=['POST'])
+@app.route('/bot/<name>/reset-commands', methods=['POST'])
 @login_required
-def test_bot_command(name):
-    """API для тестирования команд бота"""
-    data = request.get_json()
-    action = data.get('action')
-    command = data.get('command', '').strip()
-    
-    if not command:
-        return jsonify({'success': False, 'message': 'Команда не задана'})
-    
+def reset_bot_commands(name):
+    """Сбросить команды бота к стандартным значениям"""
     try:
-        # Для безопасности - просто валидируем команду, не выполняем
-        if len(command) > 1000:
-            return jsonify({'success': False, 'message': 'Команда слишком длинная'})
-        
-        # Проверяем, что команда содержит имя контейнера
-        if name not in command and '{{' not in command:
-            return jsonify({'success': False, 'message': f'Рекомендуется включить имя контейнера "{name}" в команду'})
-        
-        return jsonify({'success': True, 'message': f'✅ Команда {action} выглядит корректно'})
-    
+        commands = BotCommands.get_or_create(name)
+        commands.update_commands(start_cmd=None, stop_cmd=None, restart_cmd=None, launch_cmd=None)
+        flash(f'Команды для "{name}" сброшены к стандартным значениям!', 'success')
+        return redirect(url_for('bot_commands_config', name=name))
     except Exception as e:
-        return jsonify({'success': False, 'message': f'Ошибка валидации: {str(e)}'})
+        flash(f'Ошибка сброса команд: {str(e)}', 'danger')
+        return redirect(url_for('bot_commands_config', name=name))
 
 
 @app.route('/bots')

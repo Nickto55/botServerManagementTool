@@ -34,10 +34,13 @@
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <button type="submit" class="btn btn-success btn-lg w-100">💾 Сохранить команды</button>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-4">
+                            <a href="{{ url_for('reset_bot_commands', name=container_name) }}" class="btn btn-warning btn-lg w-100" onclick="return confirm('Сбросить все команды к стандартным значениям?')">🔄 Сбросить команды</a>
+                        </div>
+                        <div class="col-md-4">
                             <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-lg w-100">↩️ Назад к панели</a>
                         </div>
                     </div>
