@@ -24,9 +24,30 @@ fi
 
 echo "Используем публичный порт: ${PUBLIC_PORT}" 
 
-apt update
+apt update --fix-missing
 apt install -y python3 python3-venv python3-pip git docker.io nginx
 systemctl enable --now docker
+
+# Создание пользователя botops для SSH доступа
+echo "Создание пользователя botops..."
+useradd -m -s /bin/bash botops || true
+mkdir -p /home/botops/.ssh
+chown -R botops:botops /home/botops/.ssh
+chmod 700 /home/botops/.ssh
+
+# Генерация SSH ключа если не существует
+if [ ! -f /home/botops/.ssh/id_rsa ]; then
+  echo "Генерация SSH ключа для пользователя botops..."
+  sudo -u botops bash -c 'ssh-keygen -t rsa -b 4096 -N "" -f /home/botops/.ssh/id_rsa'
+fi
+
+# Добавление пользователя в группу docker
+usermod -aG docker botops
+
+echo "Пользователь botops настроен."
+
+# Сделать скрипты исполняемыми
+chmod +x diagnose.sh fix_install.sh
 
 # App dir assumption: script executed inside project root
 APP_DIR="$(pwd)"
@@ -64,6 +85,10 @@ Restart=always
 RestartSec=5
 TimeoutStartSec=60
 Environment=PYTHONUNBUFFERED=1
+Environment=EXEC_MODE=ssh
+Environment=SSH_HOST=localhost
+Environment=SSH_USER=botops
+Environment=SSH_KEY_PATH=/home/botops/.ssh/id_rsa
 
 [Install]
 WantedBy=multi-user.target

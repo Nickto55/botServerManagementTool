@@ -29,6 +29,12 @@ class Config:
     # Git
     GIT_CLONE_DEPTH = int(os.getenv('GIT_CLONE_DEPTH', '1'))
 
+    # SSH Execution (for secure Docker management)
+    EXEC_MODE = os.getenv('EXEC_MODE', 'local')  # 'local' or 'ssh'
+    SSH_HOST = os.getenv('SSH_HOST', 'localhost')
+    SSH_USER = os.getenv('SSH_USER', 'botops')
+    SSH_KEY_PATH = os.getenv('SSH_KEY_PATH', '/home/botops/.ssh/id_rsa')
+
     # Security
     BCRYPT_ROUNDS = int(os.getenv('BCRYPT_ROUNDS', '12'))
 

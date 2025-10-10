@@ -9,6 +9,8 @@ try:
 except ImportError:  # graceful degradation
     paramiko = None
 
+from config import cfg
+
 
 class ExecError(Exception):
     pass
@@ -106,12 +108,9 @@ def get_backend():
     if _backend_singleton:
         return _backend_singleton
 
-    mode = os.getenv('EXEC_MODE', 'local').lower()
+    mode = cfg.EXEC_MODE.lower()
     if mode == 'ssh':
-        host = os.getenv('SSH_HOST', '127.0.0.1')
-        user = os.getenv('SSH_USER', 'botops')
-        key_path = os.getenv('SSH_KEY_PATH', '/home/botops/.ssh/id_rsa')
-        _backend_singleton = SSHBackend(host=host, user=user, key_path=key_path)
+        _backend_singleton = SSHBackend(host=cfg.SSH_HOST, user=cfg.SSH_USER, key_path=cfg.SSH_KEY_PATH)
     else:
         _backend_singleton = LocalBackend()
     return _backend_singleton
