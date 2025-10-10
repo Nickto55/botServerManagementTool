@@ -233,6 +233,9 @@ function renderBots() {
           <button class="btn btn-outline-secondary" onclick="showInfo('${bot.name}')" title="Информация">
             <i class="fas fa-info-circle"></i>
           </button>
+          <a href="/bot/${bot.name}/commands" class="btn btn-outline-warning btn-sm" title="Настройки команд">
+            <i class="fas fa-cog"></i>
+          </a>
           <button class="btn btn-outline-dark" onclick="showExec('${bot.name}')" title="Выполнить команду">
             <i class="fas fa-terminal"></i>
           </button>
