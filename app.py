@@ -399,18 +399,63 @@ def bots_management():
 def api_bots_list():
     """API для получения списка всех ботов"""
     try:
-        bots = list_bots()
-        workspaces = list_workspaces()
+        # Получаем все контейнеры
+        containers = get_client().containers.list(all=True)
         
-        # Объединяем и помечаем типы
         all_containers = []
-        for bot in bots:
-            bot['type'] = 'bot'
-            all_containers.append(bot)
-        
-        for ws in workspaces:
-            ws['type'] = 'workspace'
-            all_containers.append(ws)
+        for c in containers:
+            # Определяем тип контейнера по labels
+            labels = c.attrs.get('Config', {}).get('Labels', {})
+            is_workspace = labels.get('workspace') == '1'
+            is_bot_manager = labels.get('bot-manager') == '1'
+            
+            # Пропускаем контейнеры, не созданные нашим менеджером
+            if not is_bot_manager:
+                continue
+            
+            # Определяем тип
+            container_type = 'workspace' if is_workspace else 'bot'
+            
+            # Проверяем наличие файлов для workspace
+            has_workspace_files = False
+            if is_workspace:
+                workspace_dir = os.path.join(cfg.BOTS_DIR, c.name)
+                has_workspace_files = os.path.exists(workspace_dir)
+            
+            container_info = {
+                'id': c.id[:12],
+                'name': c.name,
+                'status': c.status,
+                'image': c.image.tags[0] if c.image.tags else c.image.short_id,
+                'created': c.attrs.get('Created'),
+                'type': container_type,
+                'has_workspace': has_workspace_files if is_workspace else False
+            }
+            
+            # Добавляем статистику ресурсов если контейнер запущен
+            if c.status == 'running':
+                try:
+                    stats = c.stats(stream=False)
+                    if stats:
+                        cpu_stats = stats.get('cpu_stats', {})
+                        precpu_stats = stats.get('precpu_stats', {})
+                        memory_stats = stats.get('memory_stats', {})
+                        
+                        if cpu_stats and precpu_stats:
+                            cpu_delta = cpu_stats.get('cpu_usage', {}).get('total_usage', 0) - precpu_stats.get('cpu_usage', {}).get('total_usage', 0)
+                            system_delta = cpu_stats.get('system_cpu_usage', 0) - precpu_stats.get('system_cpu_usage', 0)
+                            if system_delta > 0:
+                                container_info['cpu_percent'] = round((cpu_delta / system_delta) * 100, 2)
+                        
+                        if memory_stats:
+                            container_info['memory_usage'] = memory_stats.get('usage', 0)
+                            container_info['memory_limit'] = memory_stats.get('limit', 0)
+                            if container_info['memory_limit'] > 0:
+                                container_info['memory_percent'] = round((container_info['memory_usage'] / container_info['memory_limit']) * 100, 2)
+                except:
+                    pass
+            
+            all_containers.append(container_info)
         
         return jsonify({
             'status': 'ok',
@@ -469,14 +514,19 @@ def api_bot_exec(name):
         if not command:
             return jsonify({'status': 'error', 'error': 'Команда не задана'}), 400
         
-        # Выполняем команду через Docker API
-        container = get_client().containers.get(name)
-        result = container.exec_run(command, tty=True)
+        # Выполняем команду через exec_backend
+        from exec_backend import get_backend
+        backend = get_backend()
+        
+        # Используем docker exec для выполнения команды внутри контейнера
+        full_command = f"docker exec {name} {command}"
+        stdout, stderr, exit_code = backend.run(full_command)
         
         return jsonify({
             'status': 'ok',
-            'exit_code': result.exit_code,
-            'output': result.output.decode('utf-8', errors='replace')
+            'exit_code': exit_code,
+            'output': stdout,
+            'error': stderr
         })
     except Exception as e:
         return jsonify({

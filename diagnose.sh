@@ -64,6 +64,17 @@ try:
     from exec_backend import get_backend
     backend = get_backend()
     print(f'✓ Backend: {type(backend).__name__}')
+    
+    # Тестируем SSH backend
+    try:
+        stdout, stderr, code = backend.run('echo "SSH backend test"')
+        if code == 0:
+            print('✓ SSH backend работает')
+        else:
+            print(f'✗ SSH backend ошибка: {stderr}')
+    except Exception as e:
+        print(f'✗ SSH backend недоступен: {e}')
+    
     print('Все импорты успешны!')
 except Exception as e:
     print(f'✗ Ошибка импорта: {e}')

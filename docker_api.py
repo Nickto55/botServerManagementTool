@@ -63,18 +63,34 @@ def list_bots() -> List[Dict]:
 def start_bot(name: str):
     """Запустить бот с использованием кастомной команды, если она задана"""
     try:
-        # Получаем контейнер
-        container = get_client().containers.get(name)
-        original_status = container.status
+        from exec_backend import get_backend
+        backend = get_backend()
         
-        # Сначала запускаем контейнер стандартным способом
-        if container.status != 'running':
-            container.start()
+        # Сначала проверяем статус контейнера
+        stdout, stderr, exit_code = backend.run(f"docker ps -a --filter name=^{name}$ --format '{{{{.Status}}}}'")
+        if exit_code != 0:
+            raise RuntimeError(f"Не удалось проверить статус контейнера: {stderr}")
+        
+        original_status = stdout.strip() if stdout.strip() else "unknown"
+        is_running = "Up" in original_status
+        
+        # Запускаем контейнер через SSH backend
+        if not is_running:
+            stdout, stderr, exit_code = backend.run(f"docker start {name}")
+            if exit_code != 0:
+                raise RuntimeError(f"Не удалось запустить контейнер: {stderr}")
+            
             # Ждем немного, чтобы контейнер успел запуститься
             import time
-            time.sleep(2)
-            # Обновляем статус
-            container.reload()
+            time.sleep(3)
+            
+            # Проверяем статус после запуска
+            stdout, stderr, exit_code = backend.run(f"docker ps --filter name=^{name}$ --format '{{{{.Status}}}}'")
+            if exit_code != 0:
+                raise RuntimeError(f"Не удалось проверить статус после запуска: {stderr}")
+            new_status = stdout.strip()
+        else:
+            new_status = original_status
         
         # Проверяем команды только после успешного запуска контейнера
         try:
@@ -82,24 +98,20 @@ def start_bot(name: str):
             commands = get_bot_commands(name)
         except Exception as e:
             # Если база данных недоступна - просто возвращаем успех запуска
-            return f"Контейнер запущен (статус: {original_status} → {container.status}). База команд недоступна: {str(e)}"
+            return f"Контейнер запущен (статус: {original_status} → {new_status}). База команд недоступна: {str(e)}"
         
         # Если есть кастомная команда запуска, выполняем её
         if commands and commands.start_command:
-            import subprocess
             command = commands.start_command.replace('{{ container_name }}', name)
             
-            # Проверяем что контейнер действительно запущен перед выполнением команды
-            if container.status != 'running':
-                return f"Контейнер не удалось запустить (статус: {container.status}), кастомная команда пропущена"
-            
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
+            # Выполняем кастомную команду через backend
+            stdout, stderr, exit_code = backend.run(command)
+            if exit_code != 0:
                 # Не падаем, просто сообщаем об ошибке команды
-                return f"Контейнер запущен, но кастомная команда завершилась с ошибкой.\nКоманда: {command}\nОшибка: {result.stderr}\nВывод: {result.stdout}"
-            return f"Контейнер запущен. Выполнена команда: {command}\nВывод: {result.stdout}"
+                return f"Контейнер запущен, но кастомная команда завершилась с ошибкой.\nКоманда: {command}\nОшибка: {stderr}\nВывод: {stdout}"
+            return f"Контейнер запущен. Выполнена команда: {command}\nВывод: {stdout}"
         else:
-            return f"Контейнер запущен стандартным способом (статус: {original_status} → {container.status})"
+            return f"Контейнер запущен стандартным способом (статус: {original_status} → {new_status})"
     except Exception as e:
         raise RuntimeError(f"Ошибка запуска: {str(e)}")
 
@@ -107,29 +119,41 @@ def start_bot(name: str):
 def stop_bot(name: str):
     """Остановить бот с использованием кастомной команды, если она задана"""
     try:
-        from auth import get_bot_commands
-        commands = get_bot_commands(name)
-        container = get_client().containers.get(name)
+        from exec_backend import get_backend
+        backend = get_backend()
+        
+        # Проверяем статус контейнера
+        stdout, stderr, exit_code = backend.run(f"docker ps --filter name=^{name}$ --format '{{{{.Status}}}}'")
+        if exit_code != 0:
+            raise RuntimeError(f"Не удалось проверить статус контейнера: {stderr}")
+        
+        is_running = "Up" in stdout.strip()
+        
+        # Проверяем кастомные команды
+        try:
+            from auth import get_bot_commands
+            commands = get_bot_commands(name)
+        except Exception as e:
+            commands = None
         
         # Если есть кастомная команда остановки и контейнер запущен, выполняем её
-        if commands and commands.stop_command and container.status == 'running':
-            import subprocess
+        if commands and commands.stop_command and is_running:
             command = commands.stop_command.replace('{{ container_name }}', name)
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
-                # Если кастомная команда не сработала, всё равно останавливаем контейнер
-                container.stop()
-                return f"Кастомная команда завершилась с ошибкой, но контейнер остановлен принудительно.\nОшибка: {result.stderr}"
+            stdout, stderr, exit_code = backend.run(command)
+            if exit_code != 0:
+                # Если кастомная команда не сработала, останавливаем контейнер принудительно
+                backend.run(f"docker stop {name}")
+                return f"Кастомная команда завершилась с ошибкой, но контейнер остановлен принудительно.\nОшибка: {stderr}"
             else:
                 # После выполнения кастомной команды останавливаем контейнер (если он всё ещё работает)
-                container.reload()
-                if container.status == 'running':
-                    container.stop()
-                return f"Выполнена команда: {command}\nВывод: {result.stdout}\nКонтейнер остановлен"
+                backend.run(f"docker stop {name}")
+                return f"Выполнена команда: {command}\nВывод: {stdout}\nКонтейнер остановлен"
         else:
             # Стандартное поведение
-            if container.status == 'running':
-                container.stop()
+            if is_running:
+                stdout, stderr, exit_code = backend.run(f"docker stop {name}")
+                if exit_code != 0:
+                    raise RuntimeError(f"Не удалось остановить контейнер: {stderr}")
                 return "Контейнер остановлен стандартным способом"
             else:
                 return "Контейнер уже остановлен"
@@ -140,31 +164,43 @@ def stop_bot(name: str):
 def restart_bot(name: str):
     """Перезапустить бот с использованием кастомной команды, если она задана"""
     try:
-        from auth import get_bot_commands
-        commands = get_bot_commands(name)
-        container = get_client().containers.get(name)
+        from exec_backend import get_backend
+        backend = get_backend()
+        
+        # Проверяем кастомные команды
+        try:
+            from auth import get_bot_commands
+            commands = get_bot_commands(name)
+        except Exception as e:
+            commands = None
         
         if commands and commands.restart_command:
-            # Выполняем кастомную команду через subprocess
-            import subprocess
+            # Выполняем кастомную команду через backend
             command = commands.restart_command.replace('{{ container_name }}', name)
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
-            if result.returncode != 0:
+            stdout, stderr, exit_code = backend.run(command)
+            if exit_code != 0:
                 # Если кастомная команда не сработала, перезапускаем стандартным способом
-                container.restart()
-                return f"Кастомная команда завершилась с ошибкой, выполнен стандартный перезапуск.\nОшибка: {result.stderr}"
-            return f"Выполнена команда: {command}\nВывод: {result.stdout}"
+                backend.run(f"docker restart {name}")
+                return f"Кастомная команда завершилась с ошибкой, выполнен стандартный перезапуск.\nОшибка: {stderr}"
+            return f"Выполнена команда: {command}\nВывод: {stdout}"
         else:
             # Стандартное поведение
-            container.restart()
+            stdout, stderr, exit_code = backend.run(f"docker restart {name}")
+            if exit_code != 0:
+                raise RuntimeError(f"Не удалось перезапустить контейнер: {stderr}")
             return "Контейнер перезапущен стандартным способом"
     except Exception as e:
         raise RuntimeError(f"Ошибка перезапуска: {str(e)}")
 
 
 def remove_bot(name: str, force: bool = False):
-    container = get_client().containers.get(name)
-    container.remove(force=force)
+    from exec_backend import get_backend
+    backend = get_backend()
+    
+    force_flag = "--force" if force else ""
+    stdout, stderr, exit_code = backend.run(f"docker rm {force_flag} {name}")
+    if exit_code != 0:
+        raise RuntimeError(f"Не удалось удалить контейнер: {stderr}")
     return True
 
 
@@ -176,29 +212,21 @@ def remove_workspace(name: str, delete_files: bool = False):
         name: имя workspace (оригинальное или docker-нормализованное)
         delete_files: удалить ли файлы workspace с диска
     """
-    cli = get_client()
+    from exec_backend import get_backend
+    backend = get_backend()
     
     # Получаем нормализованное имя для Docker
     docker_name = normalize_docker_name(name)
     
-    try:
-        # Пробуем найти контейнер по нормализованному имени
-        container = cli.containers.get(docker_name)
-    except:
-        try:
-            # Если не найден, пробуем по оригинальному имени
-            container = cli.containers.get(name)
-            docker_name = name
-        except:
-            raise ValueError(f'Контейнер "{name}" не найден')
-    
     # Останавливаем и удаляем контейнер
     try:
-        container.stop()
+        backend.run(f"docker stop {docker_name}")
     except:
         pass  # Контейнер может быть уже остановлен
     
-    container.remove(force=True)
+    stdout, stderr, exit_code = backend.run(f"docker rm --force {docker_name}")
+    if exit_code != 0:
+        raise RuntimeError(f"Не удалось удалить контейнер: {stderr}")
     
     # Удаляем файлы если запрошено
     if delete_files:
@@ -550,12 +578,13 @@ def exec_command(container_name: str, cmd: str):
 
 def get_bot_logs(name: str, tail: int = 100) -> str:
     """Получить логи контейнера"""
-    try:
-        container = get_client().containers.get(name)
-        logs = container.logs(tail=tail, timestamps=True)
-        return logs.decode('utf-8', errors='replace')
-    except Exception as e:
-        return f"Ошибка получения логов: {str(e)}"
+    from exec_backend import get_backend
+    backend = get_backend()
+    
+    stdout, stderr, exit_code = backend.run(f"docker logs --tail {tail} --timestamps {name}")
+    if exit_code != 0:
+        return f"Ошибка получения логов: {stderr}"
+    return stdout
 
 
 def get_bot_info(name: str) -> Dict:
