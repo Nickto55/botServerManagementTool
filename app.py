@@ -48,7 +48,7 @@ except Exception as e:
     def get_client(): raise RuntimeError("Docker недоступен")
 
 try:
-    from terminal_manager import start_terminal_session, handle_terminal_input, close_session
+    from terminal_manager import start_terminal_session, handle_terminal_input, close_session, start_server_console_session, handle_server_console_input, close_server_console_session
     TERMINAL_AVAILABLE = True
 except Exception as e:
     logger.warning(f'Terminal manager недоступен: {e}')
@@ -56,6 +56,9 @@ except Exception as e:
     def start_terminal_session(*args): pass
     def handle_terminal_input(*args): pass
     def close_session(*args): pass
+    def start_server_console_session(*args): pass
+    def handle_server_console_input(*args): pass
+    def close_server_console_session(*args): pass
 
 # Rate limiting
 limiter = Limiter(
@@ -331,6 +334,13 @@ def terminal_view(name):
     return render_template('terminal.html', container=name)
 
 
+@app.route('/server-console')
+@login_required
+def server_console():
+    """Консоль основного сервера для выполнения команд на хост-системе"""
+    return render_template('server_console.html')
+
+
 @app.route('/bot/<name>/commands', methods=['GET', 'POST'])
 @login_required
 def bot_commands_config(name):
@@ -569,6 +579,17 @@ def on_terminal_start(data):
     start_terminal_session(request.sid, container)
 
 
+@socketio.on('server_console_start')
+def on_server_console_start():
+    # Проверяем авторизацию для WebSocket
+    if 'user_id' not in session:
+        emit('server_console_output', {'data': 'Ошибка: требуется авторизация\n'})
+        return
+
+    print("Server console start requested")
+    start_server_console_session(request.sid)
+
+
 @socketio.on('terminal_input')
 def on_terminal_input(data):
     # Проверяем авторизацию для WebSocket
@@ -587,9 +608,28 @@ def on_terminal_input(data):
     handle_terminal_input(request.sid, command)
 
 
+@socketio.on('server_console_input')
+def on_server_console_input(data):
+    # Проверяем авторизацию для WebSocket
+    if 'user_id' not in session:
+        emit('server_console_output', {'data': 'Ошибка: требуется авторизация\n'})
+        return
+
+    # data может быть строкой или dict
+    if isinstance(data, str):
+        command = data
+    elif isinstance(data, dict):
+        command = data.get('data', '')
+    else:
+        command = ''
+    print(f"Server console input: {repr(command)}")
+    handle_server_console_input(request.sid, command)
+
+
 @socketio.on('disconnect')
 def on_disconnect():
     close_session(request.sid)
+    close_server_console_session(request.sid)
 
 
 @app.route('/health')

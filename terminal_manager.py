@@ -242,3 +242,138 @@ def get_session_history_for_container(container_name: str):
             with sess['lock']:
                 return sess['history'][:]
     return []
+
+
+# Глобальные переменные для консоли сервера
+SERVER_CONSOLE_SESSIONS: Dict[str, dict] = {}
+SERVER_CONSOLE_MAX_HISTORY = 200
+
+
+def start_server_console_session(sid: str):
+    """Инициализация сессии консоли сервера."""
+    try:
+        print(f"[server_console] start session sid={sid}")
+
+        SERVER_CONSOLE_SESSIONS[sid] = {
+            'active': True,
+            'history': [],
+            'lock': threading.Lock()
+        }
+
+        emit('server_console_output', {'data': '=== Консоль сервера ===\n'})
+        emit('server_console_output', {'data': 'Подключение к хост-системе...\n'})
+        emit('server_console_output', {'data': 'Сервер готов к выполнению команд.\n\n'})
+        emit('server_console_output', {'data': 'root@server:~$ '})
+
+    except Exception as e:
+        print(f"[server_console] start error: {e}")
+        emit('server_console_output', {'data': f'Ошибка запуска консоли сервера: {e}\n'})
+
+
+def handle_server_console_input(sid: str, data: str):
+    """Обработка ввода пользователя в консоли сервера."""
+    try:
+        sess = SERVER_CONSOLE_SESSIONS.get(sid)
+        if not sess:
+            emit('server_console_output', {'data': 'Сессия консоли сервера не найдена. Обновите страницу.\n'})
+            return
+
+        raw = data if isinstance(data, str) else (data.get('data') if isinstance(data, dict) else '')
+        command = (raw or '').strip()
+
+        if not command:
+            emit('server_console_output', {'data': 'root@server:~$ '})
+            return
+
+        # Специальные команды
+        if command == ':history':
+            hist_copy = []
+            with sess['lock']:
+                for h in sess['history']:
+                    hist_copy.append({k: h.get(k) for k in ['id','command','exit_code','started_at','finished_at']})
+            emit('server_console_output', {'data': '\nИстория команд (последние):\n'})
+            for h in hist_copy:
+                emit('server_console_output', {'data': f"[{h['id']}] {h['command']} (exit={h.get('exit_code')})\n"})
+            emit('server_console_output', {'data': 'root@server:~$ '})
+            return
+        elif command == ':clear':
+            emit('server_console_clear', {})
+            emit('server_console_output', {'data': 'root@server:~$ '})
+            return
+
+        cmd_id = int(time.time() * 1000)
+        entry = {
+            'id': cmd_id,
+            'command': command,
+            'stdout': '',
+            'stderr': '',
+            'exit_code': None,
+            'started_at': _now_iso(),
+            'finished_at': None,
+            'duration_ms': None
+        }
+
+        with sess['lock']:
+            sess['history'].append(entry)
+            if len(sess['history']) > SERVER_CONSOLE_MAX_HISTORY:
+                sess['history'] = sess['history'][-SERVER_CONSOLE_MAX_HISTORY:]
+
+        emit('server_console_command_started', {'id': cmd_id, 'command': command})
+        emit('server_console_output', {'data': f"{command}\n"})
+
+        def run_server_command():
+            started = time.time()
+            try:
+                backend = get_backend()
+                stdout, stderr, exit_code = backend.run(command, timeout=30)
+            except Exception as e:
+                stdout = ''
+                stderr = f'Ошибка выполнения: {e}\n'
+                exit_code = 1
+
+            finished = time.time()
+            duration_ms = int((finished - started) * 1000)
+
+            # Обновляем запись в истории
+            with sess['lock']:
+                for h in sess['history']:
+                    if h['id'] == cmd_id:
+                        h.update({
+                            'stdout': stdout,
+                            'stderr': stderr,
+                            'exit_code': exit_code,
+                            'finished_at': _now_iso(),
+                            'duration_ms': duration_ms
+                        })
+                        break
+
+            emit('server_console_command_result', {
+                'id': cmd_id,
+                'command': command,
+                'stdout': stdout,
+                'stderr': stderr,
+                'exit_code': exit_code,
+                'started_at': entry['started_at'],
+                'finished_at': _now_iso(),
+                'duration_ms': duration_ms
+            })
+
+            if stdout:
+                emit('server_console_output', {'data': stdout})
+            if stderr:
+                emit('server_console_output', {'data': f'! {stderr}'})
+            emit('server_console_output', {'data': 'root@server:~$ '})
+
+        threading.Thread(target=run_server_command, daemon=True).start()
+
+    except Exception as e:
+        print(f"[server_console] input error: {e}")
+        emit('server_console_output', {'data': f'Ошибка обработки команды: {e}\n'})
+        emit('server_console_output', {'data': 'root@server:~$ '})
+
+
+def close_server_console_session(sid: str):
+    """Закрытие сессии консоли сервера."""
+    sess = SERVER_CONSOLE_SESSIONS.pop(sid, None)
+    if sess:
+        print(f"[server_console] close session sid={sid}")
