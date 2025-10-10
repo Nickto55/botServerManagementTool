@@ -290,15 +290,18 @@ function initServerConsole() {
     });
 
     socket.on('server_console_output', function(data) {
+        console.log('[server_console] Output received:', data);
         terminal.innerHTML += data.data;
         terminal.scrollTop = terminal.scrollHeight;
     });
 
     socket.on('server_console_command_started', function(data) {
+        console.log('[server_console] Command started:', data);
         addHistoryItem({id: data.id, command: data.command});
     });
 
     socket.on('server_console_command_result', function(data) {
+        console.log('[server_console] Command result:', data);
         const li = document.querySelector(`li[data-id="${data.id}"]`);
         if (li) {
             let statusColor = data.exit_code === 0 ? '#4ec9b0' : '#f44747';
@@ -308,18 +311,32 @@ function initServerConsole() {
         }
     });
 
+    socket.on('server_console_clear', function() {
+        console.log('[server_console] Clear terminal');
+        terminal.innerHTML = '';
+    });
+
     socket.on('disconnect', function() {
+        console.log('[server_console] Disconnected');
         terminal.innerHTML += '\n\nСоединение разорвано.\n';
+    });
+
+    socket.on('error', function(error) {
+        console.error('[server_console] Socket error:', error);
+        terminal.innerHTML += '\n\n❌ Ошибка соединения: ' + error + '\n';
     });
 
     // Отправка команды
     function sendCommand() {
         const command = termInput.value.trim();
         if (command) {
+            console.log('[server_console] Sending command:', command);
             commandHistory.unshift(command);
             historyIndex = -1;
             socket.emit('server_console_input', {data: command});
             termInput.value = '';
+        } else {
+            console.log('[server_console] Empty command, skipping');
         }
     }
 
