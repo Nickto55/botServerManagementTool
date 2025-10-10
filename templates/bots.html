@@ -1,0 +1,452 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<div class="container-fluid">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="fas fa-robot"></i> Управление ботами</h2>
+    <div>
+      <button class="btn btn-primary me-2" onclick="refreshBots()">
+        <i class="fas fa-sync-alt"></i> Обновить
+      </button>
+      <a href="/" class="btn btn-secondary">
+        <i class="fas fa-home"></i> Dashboard
+      </a>
+    </div>
+  </div>
+
+  <!-- Фильтры и поиск -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <input type="text" class="form-control" id="searchInput" placeholder="Поиск по имени...">
+        </div>
+        <div class="col-md-3">
+          <select class="form-select" id="statusFilter">
+            <option value="">Все статусы</option>
+            <option value="running">Запущенные</option>
+            <option value="exited">Остановленные</option>
+            <option value="created">Созданные</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <select class="form-select" id="typeFilter">
+            <option value="">Все типы</option>
+            <option value="bot">Боты</option>
+            <option value="workspace">Workspace</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+            <i class="fas fa-times"></i> Сброс
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Таблица ботов -->
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-hover" id="botsTable">
+          <thead>
+            <tr>
+              <th>Имя</th>
+              <th>Тип</th>
+              <th>Статус</th>
+              <th>Образ</th>
+              <th>CPU</th>
+              <th>Память</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody id="botsTableBody">
+            <!-- Боты будут загружены через JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно для логов -->
+<div class="modal fade" id="logsModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-file-alt"></i> Логи: <span id="logsModalTitle"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Количество строк:</label>
+          <select class="form-select" id="logsTail" style="width: auto; display: inline-block;">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+          <button class="btn btn-sm btn-outline-primary ms-2" onclick="loadLogs()">
+            <i class="fas fa-sync-alt"></i> Обновить
+          </button>
+        </div>
+        <pre id="logsContent" class="bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto; font-size: 12px;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно для информации -->
+<div class="modal fade" id="infoModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-info-circle"></i> Информация: <span id="infoModalTitle"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="infoContent">
+          <!-- Информация будет загружена через JavaScript -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно для выполнения команд -->
+<div class="modal fade" id="execModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-terminal"></i> Выполнить команду: <span id="execModalTitle"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Команда:</label>
+          <input type="text" class="form-control" id="execCommand" placeholder="Введите команду для выполнения">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Результат:</label>
+          <pre id="execOutput" class="bg-dark text-light p-3 rounded" style="max-height: 300px; overflow-y: auto; font-size: 12px;"></pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+        <button type="button" class="btn btn-primary" onclick="executeCommand()">
+          <i class="fas fa-play"></i> Выполнить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let allBots = [];
+let currentBotName = '';
+
+async function loadBots() {
+  try {
+    const response = await fetch('/api/bots');
+    const data = await response.json();
+    
+    if (data.status === 'ok') {
+      allBots = data.containers;
+      renderBots();
+    } else {
+      showAlert('Ошибка загрузки ботов: ' + data.error, 'danger');
+    }
+  } catch (error) {
+    showAlert('Ошибка сети: ' + error.message, 'danger');
+  }
+}
+
+function renderBots() {
+  const tbody = document.getElementById('botsTableBody');
+  const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+  const statusFilter = document.getElementById('statusFilter').value;
+  const typeFilter = document.getElementById('typeFilter').value;
+  
+  const filteredBots = allBots.filter(bot => {
+    const matchesSearch = bot.name.toLowerCase().includes(searchTerm);
+    const matchesStatus = !statusFilter || bot.status === statusFilter;
+    const matchesType = !typeFilter || bot.type === typeFilter;
+    return matchesSearch && matchesStatus && matchesType;
+  });
+  
+  tbody.innerHTML = '';
+  
+  if (filteredBots.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4"><i class="fas fa-robot fa-2x text-muted mb-2"></i><br>Нет ботов соответствующих фильтрам</td></tr>';
+    return;
+  }
+  
+  filteredBots.forEach(bot => {
+    const statusClass = bot.status === 'running' ? 'success' : 
+                       bot.status === 'exited' ? 'secondary' : 'warning';
+    const statusIcon = bot.status === 'running' ? '▶' : 
+                      bot.status === 'exited' ? '■' : '⏸';
+    
+    const cpuPercent = bot.cpu_percent !== undefined ? `${bot.cpu_percent}%` : '-';
+    const memoryPercent = bot.memory_percent !== undefined ? `${bot.memory_percent}%` : '-';
+    
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>
+        <strong>${bot.name}</strong>
+        <br><small class="text-muted">${bot.id}</small>
+      </td>
+      <td>
+        <span class="badge bg-${bot.type === 'workspace' ? 'info' : 'primary'}">
+          ${bot.type === 'workspace' ? 'Workspace' : 'Бот'}
+        </span>
+      </td>
+      <td>
+        <span class="badge bg-${statusClass}">
+          ${statusIcon} ${bot.status}
+        </span>
+      </td>
+      <td>
+        <code>${bot.image}</code>
+      </td>
+      <td>${cpuPercent}</td>
+      <td>${memoryPercent}</td>
+      <td>
+        <div class="btn-group btn-group-sm" role="group">
+          ${bot.status === 'running' ? 
+            `<button class="btn btn-outline-warning" onclick="botAction('${bot.name}', 'stop')" title="Остановить">
+              <i class="fas fa-stop"></i>
+            </button>
+            <button class="btn btn-outline-info" onclick="botAction('${bot.name}', 'restart')" title="Перезапустить">
+              <i class="fas fa-redo"></i>
+            </button>` :
+            `<button class="btn btn-outline-success" onclick="botAction('${bot.name}', 'start')" title="Запустить">
+              <i class="fas fa-play"></i>
+            </button>`
+          }
+          <button class="btn btn-outline-primary" onclick="showLogs('${bot.name}')" title="Логи">
+            <i class="fas fa-file-alt"></i>
+          </button>
+          <button class="btn btn-outline-secondary" onclick="showInfo('${bot.name}')" title="Информация">
+            <i class="fas fa-info-circle"></i>
+          </button>
+          <button class="btn btn-outline-dark" onclick="showExec('${bot.name}')" title="Выполнить команду">
+            <i class="fas fa-terminal"></i>
+          </button>
+          <button class="btn btn-outline-danger" onclick="botAction('${bot.name}', 'remove')" title="Удалить">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+async function botAction(name, action) {
+  const actionNames = {
+    'start': 'Запуск',
+    'stop': 'Остановка',
+    'restart': 'Перезапуск',
+    'remove': 'Удаление'
+  };
+  
+  if (action === 'remove' && !confirm(`Удалить контейнер "${name}"?\n\nВнимание: Данные workspace сохранятся в папке bots/`)) {
+    return;
+  }
+  
+  showAlert(`🔄 ${actionNames[action]} "${name}"...`, 'info');
+  
+  try {
+    const response = await fetch(`/bots/${name}/${action}`, { method: 'POST' });
+    const data = await response.json();
+    
+    if (data.status === 'ok') {
+      showAlert(`✅ ${actionNames[action]} "${name}" выполнен`, 'success');
+      setTimeout(() => loadBots(), 1000);
+    } else {
+      showAlert(`❌ Ошибка ${actionNames[action].toLowerCase()}: ${data.error}`, 'danger');
+    }
+  } catch (error) {
+    showAlert(`🔴 Ошибка сети: ${error.message}`, 'danger');
+  }
+}
+
+function showLogs(name) {
+  currentBotName = name;
+  document.getElementById('logsModalTitle').textContent = name;
+  const modal = new bootstrap.Modal(document.getElementById('logsModal'));
+  modal.show();
+  loadLogs();
+}
+
+async function loadLogs() {
+  const tail = document.getElementById('logsTail').value;
+  document.getElementById('logsContent').textContent = 'Загрузка логов...';
+  
+  try {
+    const response = await fetch(`/api/bot/${currentBotName}/logs?tail=${tail}`);
+    const data = await response.json();
+    
+    if (data.status === 'ok') {
+      document.getElementById('logsContent').textContent = data.logs || 'Логи пустые';
+    } else {
+      document.getElementById('logsContent').textContent = 'Ошибка: ' + data.error;
+    }
+  } catch (error) {
+    document.getElementById('logsContent').textContent = 'Ошибка сети: ' + error.message;
+  }
+}
+
+function showInfo(name) {
+  currentBotName = name;
+  document.getElementById('infoModalTitle').textContent = name;
+  const modal = new bootstrap.Modal(document.getElementById('infoModal'));
+  modal.show();
+  loadInfo();
+}
+
+async function loadInfo() {
+  document.getElementById('infoContent').innerHTML = '<div class="text-center"><div class="spinner-border"></div> Загрузка...</div>';
+  
+  try {
+    const response = await fetch(`/api/bot/${currentBotName}/info`);
+    const data = await response.json();
+    
+    if (data.status === 'ok') {
+      const info = data.info;
+      let html = '<div class="row">';
+      
+      if (info.error) {
+        html = `<div class="alert alert-danger">${info.error}</div>`;
+      } else {
+        html += `
+          <div class="col-md-6">
+            <h6>Основная информация</h6>
+            <table class="table table-sm">
+              <tr><td><strong>ID:</strong></td><td><code>${info.id}</code></td></tr>
+              <tr><td><strong>Имя:</strong></td><td>${info.name}</td></tr>
+              <tr><td><strong>Статус:</strong></td><td><span class="badge bg-${info.status === 'running' ? 'success' : 'secondary'}">${info.status}</span></td></tr>
+              <tr><td><strong>Образ:</strong></td><td><code>${info.image}</code></td></tr>
+              <tr><td><strong>Создан:</strong></td><td>${new Date(info.created).toLocaleString()}</td></tr>
+            </table>
+          </div>
+          <div class="col-md-6">
+            <h6>Ресурсы</h6>
+            <table class="table table-sm">
+              <tr><td><strong>CPU:</strong></td><td>${info.cpu_percent !== undefined ? info.cpu_percent + '%' : 'Н/Д'}</td></tr>
+              <tr><td><strong>Память:</strong></td><td>${info.memory_percent !== undefined ? info.memory_percent + '%' : 'Н/Д'}</td></tr>
+              <tr><td><strong>Использование:</strong></td><td>${formatBytes(info.memory_usage)} / ${formatBytes(info.memory_limit)}</td></tr>
+            </table>
+            
+            <h6>Конфигурация</h6>
+            <table class="table table-sm">
+              <tr><td><strong>Рабочая директория:</strong></td><td><code>${info.working_dir || 'Н/Д'}</code></td></tr>
+              <tr><td><strong>Команда:</strong></td><td><code>${Array.isArray(info.command) ? info.command.join(' ') : info.command || 'Н/Д'}</code></td></tr>
+              <tr><td><strong>Перезапуск:</strong></td><td>${info.restart_policy || 'no'}</td></tr>
+            </table>
+          </div>
+        `;
+      }
+      
+      html += '</div>';
+      document.getElementById('infoContent').innerHTML = html;
+    } else {
+      document.getElementById('infoContent').innerHTML = '<div class="alert alert-danger">Ошибка: ' + data.error + '</div>';
+    }
+  } catch (error) {
+    document.getElementById('infoContent').innerHTML = '<div class="alert alert-danger">Ошибка сети: ' + error.message + '</div>';
+  }
+}
+
+function showExec(name) {
+  currentBotName = name;
+  document.getElementById('execModalTitle').textContent = name;
+  document.getElementById('execCommand').value = '';
+  document.getElementById('execOutput').textContent = '';
+  const modal = new bootstrap.Modal(document.getElementById('execModal'));
+  modal.show();
+}
+
+async function executeCommand() {
+  const command = document.getElementById('execCommand').value.trim();
+  if (!command) {
+    alert('Введите команду');
+    return;
+  }
+  
+  document.getElementById('execOutput').textContent = 'Выполнение команды...';
+  
+  try {
+    const response = await fetch(`/api/bot/${currentBotName}/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: command })
+    });
+    
+    const data = await response.json();
+    
+    if (data.status === 'ok') {
+      document.getElementById('execOutput').textContent = 
+        `Exit code: ${data.exit_code}\n\n${data.output}`;
+    } else {
+      document.getElementById('execOutput').textContent = 'Ошибка: ' + data.error;
+    }
+  } catch (error) {
+    document.getElementById('execOutput').textContent = 'Ошибка сети: ' + error.message;
+  }
+}
+
+function refreshBots() {
+  loadBots();
+}
+
+function clearFilters() {
+  document.getElementById('searchInput').value = '';
+  document.getElementById('statusFilter').value = '';
+  document.getElementById('typeFilter').value = '';
+  renderBots();
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function showAlert(message, type = 'info') {
+  const alertDiv = document.createElement('div');
+  alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+  alertDiv.innerHTML = `
+    ${message}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  `;
+  
+  const container = document.querySelector('.container-fluid');
+  container.insertBefore(alertDiv, container.firstChild);
+  
+  setTimeout(() => {
+    alertDiv.remove();
+  }, 5000);
+}
+
+// Инициализация
+document.addEventListener('DOMContentLoaded', function() {
+  loadBots();
+  
+  // Фильтры
+  document.getElementById('searchInput').addEventListener('input', renderBots);
+  document.getElementById('statusFilter').addEventListener('change', renderBots);
+  document.getElementById('typeFilter').addEventListener('change', renderBots);
+  
+  // Автообновление каждые 30 секунд
+  setInterval(loadBots, 30000);
+});
+</script>
+
+{% endblock %}

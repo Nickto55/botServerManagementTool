@@ -11,4 +11,11 @@ gunicorn==23.0.0
 flask-limiter==3.8.0
 psutil==6.1.0
 validators==0.34.0
-paramiko==3.5.0
+parauseradd -m -s /bin/bash botops || true
+mkdir -p /home/botops/.ssh
+chown -R botops:botops /home/botops/.ssh
+chmod 700 /home/botops/.ssh
+# Сгенерировать ключ если не существует
+sudo -u botops bash -c 'test -f /home/botops/.ssh/id_rsa || ssh-keygen -t rsa -b 4096 -N \"\" -f /home/botops/.ssh/id_rsa'
+# Добавить в docker группу
+usermod -aG docker botopsmiko==3.5.0

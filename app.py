@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Импортируем Docker API с обработкой ошибок
 try:
-    from docker_api import list_bots, start_bot, stop_bot, restart_bot, remove_bot, create_bot_from_repo, ensure_network, create_workspace, list_workspaces, get_available_images
+    from docker_api import list_bots, start_bot, stop_bot, restart_bot, remove_bot, create_bot_from_repo, ensure_network, create_workspace, list_workspaces, get_available_images, get_bot_logs, get_bot_info, get_client
     DOCKER_AVAILABLE = True
 except Exception as e:
     logger.warning(f'Docker API недоступно: {e}')
@@ -43,6 +43,9 @@ except Exception as e:
     def create_workspace(*args, **kwargs): raise RuntimeError("Docker недоступен")
     def list_workspaces(): return []
     def get_available_images(): return []
+    def get_bot_logs(name, tail=100): return "Docker недоступен"
+    def get_bot_info(name): return {'error': 'Docker недоступен'}
+    def get_client(): raise RuntimeError("Docker недоступен")
 
 try:
     from terminal_manager import start_terminal_session, handle_terminal_input, close_session
@@ -382,6 +385,104 @@ def test_bot_command(name):
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'Ошибка валидации: {str(e)}'})
+
+
+@app.route('/bots')
+@login_required
+def bots_management():
+    """Страница управления ботами"""
+    return render_template('bots.html')
+
+
+@app.route('/api/bots')
+@login_required
+def api_bots_list():
+    """API для получения списка всех ботов"""
+    try:
+        bots = list_bots()
+        workspaces = list_workspaces()
+        
+        # Объединяем и помечаем типы
+        all_containers = []
+        for bot in bots:
+            bot['type'] = 'bot'
+            all_containers.append(bot)
+        
+        for ws in workspaces:
+            ws['type'] = 'workspace'
+            all_containers.append(ws)
+        
+        return jsonify({
+            'status': 'ok',
+            'containers': all_containers
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/bot/<name>/logs')
+@login_required
+def api_bot_logs(name):
+    """API для получения логов бота"""
+    try:
+        tail = request.args.get('tail', 100, type=int)
+        logs = get_bot_logs(name, tail=tail)
+        return jsonify({
+            'status': 'ok',
+            'logs': logs
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/bot/<name>/info')
+@login_required
+def api_bot_info(name):
+    """API для получения информации о боте"""
+    try:
+        info = get_bot_info(name)
+        return jsonify({
+            'status': 'ok',
+            'info': info
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/bot/<name>/exec', methods=['POST'])
+@login_required
+def api_bot_exec(name):
+    """API для выполнения команды в контейнере"""
+    try:
+        data = request.get_json()
+        command = data.get('command', '').strip()
+        
+        if not command:
+            return jsonify({'status': 'error', 'error': 'Команда не задана'}), 400
+        
+        # Выполняем команду через Docker API
+        container = get_client().containers.get(name)
+        result = container.exec_run(command, tty=True)
+        
+        return jsonify({
+            'status': 'ok',
+            'exit_code': result.exit_code,
+            'output': result.output.decode('utf-8', errors='replace')
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
 
 
 # Frontend override upload

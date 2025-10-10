@@ -546,3 +546,62 @@ def exec_command(container_name: str, cmd: str):
     container = get_client().containers.get(container_name)
     exec_id = get_client().api.exec_create(container.id, cmd, tty=True, stdin=True)
     return exec_id['Id']
+
+
+def get_bot_logs(name: str, tail: int = 100) -> str:
+    """Получить логи контейнера"""
+    try:
+        container = get_client().containers.get(name)
+        logs = container.logs(tail=tail, timestamps=True)
+        return logs.decode('utf-8', errors='replace')
+    except Exception as e:
+        return f"Ошибка получения логов: {str(e)}"
+
+
+def get_bot_info(name: str) -> Dict:
+    """Получить детальную информацию о контейнере"""
+    try:
+        container = get_client().containers.get(name)
+        attrs = container.attrs
+        
+        info = {
+            'id': container.id,
+            'name': container.name,
+            'status': container.status,
+            'image': container.image.tags[0] if container.image.tags else container.image.short_id,
+            'created': attrs.get('Created'),
+            'ports': attrs.get('NetworkSettings', {}).get('Ports', {}),
+            'volumes': attrs.get('Mounts', []),
+            'labels': attrs.get('Config', {}).get('Labels', {}),
+            'command': attrs.get('Config', {}).get('Cmd'),
+            'working_dir': attrs.get('Config', {}).get('WorkingDir'),
+            'env_vars': len(attrs.get('Config', {}).get('Env', [])),
+            'restart_policy': attrs.get('HostConfig', {}).get('RestartPolicy', {}).get('Name'),
+            'network_mode': attrs.get('HostConfig', {}).get('NetworkMode'),
+        }
+        
+        # Добавляем статистику использования ресурсов
+        try:
+            stats = container.stats(stream=False)
+            if stats:
+                cpu_stats = stats.get('cpu_stats', {})
+                precpu_stats = stats.get('precpu_stats', {})
+                memory_stats = stats.get('memory_stats', {})
+                
+                if cpu_stats and precpu_stats:
+                    cpu_delta = cpu_stats.get('cpu_usage', {}).get('total_usage', 0) - precpu_stats.get('cpu_usage', {}).get('total_usage', 0)
+                    system_delta = cpu_stats.get('system_cpu_usage', 0) - precpu_stats.get('system_cpu_usage', 0)
+                    if system_delta > 0:
+                        info['cpu_percent'] = round((cpu_delta / system_delta) * 100, 2)
+                
+                if memory_stats:
+                    info['memory_usage'] = memory_stats.get('usage', 0)
+                    info['memory_limit'] = memory_stats.get('limit', 0)
+                    if info['memory_limit'] > 0:
+                        info['memory_percent'] = round((info['memory_usage'] / info['memory_limit']) * 100, 2)
+        except:
+            pass
+        
+        return info
+    except Exception as e:
+        return {'error': str(e)}
