@@ -36,10 +36,58 @@ groups botops 2>/dev/null | grep -q docker && echo "✓ Пользователь
 
 echo -e "\n7. Проверка SSH ключей..."
 if [ -f "/home/botops/.ssh/id_rsa" ]; then
-    echo "✓ SSH ключ существует"
+    echo "✓ SSH приватный ключ существует"
     ls -la /home/botops/.ssh/id_rsa
 else
-    echo "✗ SSH ключ не найден"
+    echo "✗ SSH приватный ключ не найден"
+fi
+
+if [ -f "/home/botops/.ssh/id_rsa.pub" ]; then
+    echo "✓ SSH публичный ключ существует"
+    ls -la /home/botops/.ssh/id_rsa.pub
+else
+    echo "✗ SSH публичный ключ не найден"
+fi
+
+if [ -f "/home/botops/.ssh/authorized_keys" ]; then
+    echo "✓ SSH authorized_keys существует"
+    ls -la /home/botops/.ssh/authorized_keys
+    grep -q "$(cat /home/botops/.ssh/id_rsa.pub 2>/dev/null)" /home/botops/.ssh/authorized_keys && echo "✓ Публичный ключ добавлен в authorized_keys" || echo "✗ Публичный ключ НЕ добавлен в authorized_keys"
+else
+    echo "✗ SSH authorized_keys не найден"
+fi
+
+# Проверяем, что ключ может быть прочитан
+if [ -f "$APP_DIR/venv/bin/python" ] && [ -f "/home/botops/.ssh/id_rsa" ]; then
+    echo "Тестирование SSH ключа..."
+    $APP_DIR/venv/bin/python -c "
+import paramiko
+try:
+    key = paramiko.RSAKey.from_private_key_file('/home/botops/.ssh/id_rsa')
+    print('✓ SSH ключ валиден')
+except Exception as e:
+    print(f'✗ SSH ключ поврежден: {e}')
+    print('Перегенерация ключа...')
+    import subprocess
+    import os
+    # Удаляем старые ключи
+    os.remove('/home/botops/.ssh/id_rsa')
+    os.remove('/home/botops/.ssh/id_rsa.pub') if os.path.exists('/home/botops/.ssh/id_rsa.pub') else None
+    # Генерируем новые
+    result = subprocess.run(['sudo', '-u', 'botops', 'ssh-keygen', '-t', 'rsa', '-b', '2048', '-N', '', '-f', '/home/botops/.ssh/id_rsa', '-q'], 
+                          capture_output=True, text=True)
+    if result.returncode == 0:
+        print('✓ SSH ключ перегенерирован')
+        # Добавляем в authorized_keys
+        with open('/home/botops/.ssh/id_rsa.pub', 'r') as f:
+            pub_key = f.read().strip()
+        with open('/home/botops/.ssh/authorized_keys', 'a') as f:
+            f.write(pub_key + '\n')
+        os.chmod('/home/botops/.ssh/authorized_keys', 0o600)
+        print('✓ Публичный ключ добавлен в authorized_keys')
+    else:
+        print(f'✗ Ошибка перегенерации: {result.stderr}')
+"
 fi
 
 echo -e "\n8. Проверка Docker..."
@@ -67,13 +115,27 @@ try:
     
     # Тестируем SSH backend
     try:
+        backend = get_backend()
+        print(f'✓ Backend: {type(backend).__name__}')
+        
+        if hasattr(backend, 'key_path'):
+            print(f'✓ SSH key path: {backend.key_path}')
+            import os
+            if os.path.exists(backend.key_path):
+                print('✓ SSH key file exists')
+            else:
+                print('✗ SSH key file not found')
+        
+        # Простой тест команды
         stdout, stderr, code = backend.run('echo "SSH backend test"')
-        if code == 0:
+        if code == 0 and 'SSH backend test' in stdout:
             print('✓ SSH backend работает')
         else:
-            print(f'✗ SSH backend ошибка: {stderr}')
+            print(f'✗ SSH backend ошибка: code={code}, stderr={stderr}')
     except Exception as e:
         print(f'✗ SSH backend недоступен: {e}')
+        import traceback
+        traceback.print_exc()
     
     print('Все импорты успешны!')
 except Exception as e:
@@ -92,3 +154,8 @@ stat -c '%U:%G' "$APP_DIR"
 
 echo -e "\n=== Конец диагностики ==="
 echo "Для ручного запуска: cd $APP_DIR && ./venv/bin/python app.py"
+echo ""
+echo "Для исправления SSH ключей выполните:"
+echo "  sudo -u botops ssh-keygen -t rsa -b 2048 -N '' -f /home/botops/.ssh/id_rsa -q"
+echo "  sudo -u botops bash -c 'cat /home/botops/.ssh/id_rsa.pub >> /home/botops/.ssh/authorized_keys'"
+echo "  chmod 600 /home/botops/.ssh/authorized_keys"

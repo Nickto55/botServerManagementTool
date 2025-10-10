@@ -50,18 +50,32 @@ class SSHBackend:
     def _get_client(self):
         if not paramiko:
             raise ExecError('Paramiko not installed')
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            hostname=self.host,
-            username=self.user,
-            key_filename=self.key_path,
-            port=self.port,
-            look_for_keys=False,
-            allow_agent=True,
-            timeout=10
-        )
-        return client
+        
+        # Проверяем существование ключа
+        if not os.path.exists(self.key_path):
+            raise ExecError(f'SSH key not found: {self.key_path}')
+        
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Загружаем приватный ключ
+            private_key = paramiko.RSAKey.from_private_key_file(self.key_path)
+            
+            client.connect(
+                hostname=self.host,
+                username=self.user,
+                pkey=private_key,
+                port=self.port,
+                look_for_keys=False,
+                allow_agent=False,  # Отключаем SSH агент
+                timeout=10
+            )
+            return client
+        except paramiko.SSHException as e:
+            raise ExecError(f'SSH connection failed: {e}')
+        except Exception as e:
+            raise ExecError(f'SSH key error: {e}')
 
     def run(self, command: str, timeout: int = 30) -> Tuple[str, str, int]:
         client = None

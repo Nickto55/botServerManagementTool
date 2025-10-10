@@ -38,7 +38,14 @@ chmod 700 /home/botops/.ssh
 # Генерация SSH ключа если не существует
 if [ ! -f /home/botops/.ssh/id_rsa ]; then
   echo "Генерация SSH ключа для пользователя botops..."
-  sudo -u botops bash -c 'ssh-keygen -t rsa -b 4096 -N "" -f /home/botops/.ssh/id_rsa'
+  sudo -u botops bash -c 'ssh-keygen -t rsa -b 2048 -N "" -f /home/botops/.ssh/id_rsa -q'
+fi
+
+# Настройка авторизации для SSH ключа (добавляем публичный ключ в authorized_keys)
+if [ -f /home/botops/.ssh/id_rsa.pub ]; then
+  sudo -u botops bash -c 'cat /home/botops/.ssh/id_rsa.pub >> /home/botops/.ssh/authorized_keys'
+  chmod 600 /home/botops/.ssh/authorized_keys
+  chown botops:botops /home/botops/.ssh/authorized_keys
 fi
 
 # Добавление пользователя в группу docker

@@ -13,6 +13,7 @@
 3. **Недостаточная обработка ошибок** - отсутствовала диагностика проблем
 4. **Проблемы с SSH пользователем** - отсутствовал пользователь botops для безопасного исполнения
 5. **Ошибки в requirements.txt** - shell команды попали в pip зависимости
+6. **Поврежденные SSH ключи** - проблемы с RSA ключами paramiko
 
 ## Внесенные изменения
 
@@ -41,6 +42,11 @@
 - Показывает статус инициализации
 - Проверяет доступность Docker и базы данных
 - Помогает в диагностике проблем
+
+### 6. Исправление SSH ключей
+- Скрипт `fix_ssh_keys.sh` для перегенерации поврежденных ключей
+- Диагностика валидности SSH ключей
+- Автоматическое исправление проблем с ключами
 
 ## Новая функциональность управления ботами
 
@@ -108,6 +114,35 @@
    groups botops
    ls -la /home/botops/.ssh/
    ```
+
+## Исправление SSH ключей
+
+Если получаете ошибку "q must be exactly 160, 224, or 256 bits long" при получении логов или выполнении команд:
+
+### Автоматическое исправление:
+```bash
+cd /root/botServerManagementTool
+sudo bash fix_ssh_keys.sh
+```
+
+### Ручное исправление:
+```bash
+# Удалить старые ключи
+rm -f /home/botops/.ssh/id_rsa*
+# Перегенерировать ключи
+sudo -u botops ssh-keygen -t rsa -b 2048 -N "" -f /home/botops/.ssh/id_rsa -q
+# Настроить авторизацию
+sudo -u botops bash -c 'cat /home/botops/.ssh/id_rsa.pub >> /home/botops/.ssh/authorized_keys'
+chmod 600 /home/botops/.ssh/authorized_keys
+# Перезапустить службу
+systemctl restart botmanager
+```
+
+### Диагностика SSH:
+```bash
+cd /root/botServerManagementTool
+bash diagnose.sh
+```
 
 ## Ожидаемый результат
 
