@@ -83,17 +83,17 @@ sudo bash install.sh
 
 ```bash
 # Проверить статус
-sudo systemctl status bot-manager
+sudo systemctl status botmanager
 
 # Перезапустить
-sudo systemctl restart bot-manager
+sudo systemctl restart botmanager
 
 # Посмотреть логи  
-sudo journalctl -u bot-manager -f
+sudo journalctl -u botmanager -f
 
 # Остановить/запустить
-sudo systemctl stop bot-manager
-sudo systemctl start bot-manager
+sudo systemctl stop botmanager
+sudo systemctl start botmanager
 ```
 
 ## Системные требования
