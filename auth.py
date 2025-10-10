@@ -19,6 +19,7 @@ class BotCommands(Base):
     start_command = Column(Text, nullable=True)
     stop_command = Column(Text, nullable=True)
     restart_command = Column(Text, nullable=True)
+    launch_command = Column(Text, nullable=True)
     
     @staticmethod
     def get_or_create(container_name: str):
@@ -36,7 +37,7 @@ class BotCommands(Base):
         finally:
             db.close()
     
-    def update_commands(self, start_cmd=None, stop_cmd=None, restart_cmd=None):
+    def update_commands(self, start_cmd=None, stop_cmd=None, restart_cmd=None, launch_cmd=None):
         """Обновить команды"""
         db = SessionLocal()
         try:
@@ -46,6 +47,8 @@ class BotCommands(Base):
                 self.stop_command = stop_cmd
             if restart_cmd is not None:
                 self.restart_command = restart_cmd
+            if launch_cmd is not None:
+                self.launch_command = launch_cmd
             db.merge(self)
             db.commit()
         finally:
@@ -226,8 +229,8 @@ def get_bot_commands(container_name: str):
         db.close()
 
 
-def save_bot_commands(container_name: str, start_cmd: str = None, stop_cmd: str = None, restart_cmd: str = None):
+def save_bot_commands(container_name: str, start_cmd: str = None, stop_cmd: str = None, restart_cmd: str = None, launch_cmd: str = None):
     """Сохранить команды для контейнера"""
     commands = BotCommands.get_or_create(container_name)
-    commands.update_commands(start_cmd, stop_cmd, restart_cmd)
+    commands.update_commands(start_cmd, stop_cmd, restart_cmd, launch_cmd)
     return commands

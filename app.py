@@ -336,11 +336,12 @@ def terminal_view(name):
 def bot_commands_config(name):
     """Настройка команд для бота"""
     if request.method == 'POST':
+        launch_cmd = request.form.get('launch_command', '').strip() or None
         start_cmd = request.form.get('start_command', '').strip() or None
         stop_cmd = request.form.get('stop_command', '').strip() or None 
         restart_cmd = request.form.get('restart_command', '').strip() or None
         
-        save_bot_commands(name, start_cmd, stop_cmd, restart_cmd)
+        save_bot_commands(name, start_cmd, stop_cmd, restart_cmd, launch_cmd)
         flash(f'Команды для "{name}" успешно сохранены!', 'success')
         return redirect(url_for('bot_commands_config', name=name))
     
@@ -358,7 +359,7 @@ def bot_commands_config(name):
     return render_template('bot_commands.html', 
                          container_name=name,
                          container_status=container_status,
-                         commands=commands or type('obj', (object,), {'start_command': None, 'stop_command': None, 'restart_command': None})())
+                         commands=commands or type('obj', (object,), {'launch_command': None, 'start_command': None, 'stop_command': None, 'restart_command': None})())
 
 
 @app.route('/api/bot/<name>/test-command', methods=['POST'])

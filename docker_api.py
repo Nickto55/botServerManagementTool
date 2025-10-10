@@ -74,33 +74,55 @@ def start_bot(name: str):
         original_status = stdout.strip() if stdout.strip() else "unknown"
         is_running = "Up" in original_status
         
-        # Запускаем контейнер через SSH backend
-        if not is_running:
-            stdout, stderr, exit_code = backend.run(f"docker start {name}")
+        # Проверяем кастомные команды
+        try:
+            from auth import get_bot_commands
+            commands = get_bot_commands(name)
+        except Exception as e:
+            commands = None
+        
+        # Если есть кастомная команда запуска контейнера, используем её
+        if commands and commands.launch_command:
+            command = commands.launch_command.replace('{{ container_name }}', name)
+            
+            # Выполняем кастомную команду запуска через backend
+            stdout, stderr, exit_code = backend.run(command)
             if exit_code != 0:
-                raise RuntimeError(f"Не удалось запустить контейнер: {stderr}")
+                raise RuntimeError(f"Не удалось выполнить кастомную команду запуска: {stderr}")
             
             # Ждем немного, чтобы контейнер успел запуститься
             import time
             time.sleep(3)
             
             # Проверяем статус после запуска
-            stdout, stderr, exit_code = backend.run(f"docker ps --filter name=^{name}$ --format '{{{{.Status}}}}'")
-            if exit_code != 0:
-                raise RuntimeError(f"Не удалось проверить статус после запуска: {stderr}")
-            new_status = stdout.strip()
+            stdout_check, stderr_check, exit_code_check = backend.run(f"docker ps --filter name=^{name}$ --format '{{{{.Status}}}}'")
+            if exit_code_check != 0:
+                raise RuntimeError(f"Не удалось проверить статус после запуска: {stderr_check}")
+            new_status = stdout_check.strip()
+            
+            launch_result = f"Выполнена команда запуска: {command}\nВывод: {stdout}"
         else:
-            new_status = original_status
+            # Стандартный запуск контейнера
+            if not is_running:
+                stdout, stderr, exit_code = backend.run(f"docker start {name}")
+                if exit_code != 0:
+                    raise RuntimeError(f"Не удалось запустить контейнер: {stderr}")
+                
+                # Ждем немного, чтобы контейнер успел запуститься
+                import time
+                time.sleep(3)
+                
+                # Проверяем статус после запуска
+                stdout_check, stderr_check, exit_code_check = backend.run(f"docker ps --filter name=^{name}$ --format '{{{{.Status}}}}'")
+                if exit_code_check != 0:
+                    raise RuntimeError(f"Не удалось проверить статус после запуска: {stderr_check}")
+                new_status = stdout_check.strip()
+            else:
+                new_status = original_status
+            
+            launch_result = f"Контейнер запущен стандартным способом (статус: {original_status} → {new_status})"
         
-        # Проверяем команды только после успешного запуска контейнера
-        try:
-            from auth import get_bot_commands
-            commands = get_bot_commands(name)
-        except Exception as e:
-            # Если база данных недоступна - просто возвращаем успех запуска
-            return f"Контейнер запущен (статус: {original_status} → {new_status}). База команд недоступна: {str(e)}"
-        
-        # Если есть кастомная команда запуска, выполняем её
+        # Если есть кастомная команда запуска (после старта контейнера), выполняем её
         if commands and commands.start_command:
             command = commands.start_command.replace('{{ container_name }}', name)
             
@@ -108,10 +130,10 @@ def start_bot(name: str):
             stdout, stderr, exit_code = backend.run(command)
             if exit_code != 0:
                 # Не падаем, просто сообщаем об ошибке команды
-                return f"Контейнер запущен, но кастомная команда завершилась с ошибкой.\nКоманда: {command}\nОшибка: {stderr}\nВывод: {stdout}"
-            return f"Контейнер запущен. Выполнена команда: {command}\nВывод: {stdout}"
+                return f"{launch_result}\nНо кастомная команда завершилась с ошибкой.\nКоманда: {command}\nОшибка: {stderr}\nВывод: {stdout}"
+            return f"{launch_result}\nВыполнена команда: {command}\nВывод: {stdout}"
         else:
-            return f"Контейнер запущен стандартным способом (статус: {original_status} → {new_status})"
+            return launch_result
     except Exception as e:
         raise RuntimeError(f"Ошибка запуска: {str(e)}")
 
